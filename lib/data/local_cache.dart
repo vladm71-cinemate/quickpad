@@ -195,6 +195,24 @@ class LocalCache {
     saveMessages();
   }
 
+  /// Удалить сообщение из кэша.
+  void removeChatMessage(String messageId) {
+    final int i = messages.indexWhere((m) => m.id == messageId);
+    if (i >= 0) {
+      messages.removeAt(i);
+      saveMessages();
+    }
+  }
+
+  /// Очистить переписку между двумя пользователями.
+  void clearChat(String userA, String userB) {
+    final int before = messages.length;
+    messages.removeWhere((m) =>
+        (m.fromId == userA && m.toId == userB) ||
+        (m.fromId == userB && m.toId == userA));
+    if (messages.length != before) saveMessages();
+  }
+
   /// Отметить прочитанными входящие от [fromId] (локально, до ответа хоста).
   void applyChatRead({required String fromId, required String toId}) {
     bool changed = false;

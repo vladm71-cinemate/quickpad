@@ -56,6 +56,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   bool _recording = false;
   bool _playingAudio = false;
   DateTime? _recStarted;
+  String _recTranscript = ''; // буфер расшифровки гибридного режима
   bool _saving = false;
 
   bool get _isNew => _original == null;
@@ -133,6 +134,8 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     final AppState app = context.read<AppState>();
     if (_recording) {
       final RecordedAudio? rec = await app.audio.stopRecording();
+      // Остановить параллельную расшифровку (гибридный режим).
+      await app.stt.stop();
       setState(() => _recording = false);
       if (rec == null) {
         _toast('Запись не удалась');
@@ -143,11 +146,18 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         _toast('Не удалось передать аудио на хост');
         return;
       }
-      setState(() => _audio = att);
-      // Гибридный режим: автоматическая расшифровка (ТЗ 4.1).
-      if (app.ls.hybridEnabled && app.ls.autoTranscribe) {
-        _transcribeAudio(att);
+      // Гибридный режим (ТЗ 4.1): аудио + автоматическая расшифровка в текст.
+      // Аудио хранится рядом с заявкой, текст остаётся редактируемым.
+      final String transcript = _recTranscript.trim();
+      if (transcript.isNotEmpty) {
+        att.transcript = transcript;
+        if (_textCtl.text.trim().isEmpty) {
+          _textCtl.text = transcript; // текст можно править
+          _textCtl.selection =
+              TextSelection.collapsed(offset: _textCtl.text.length);
+        }
       }
+      setState(() => _audio = att);
     } else {
       final bool ok = await app.audio.startRecording();
       if (!ok) {
@@ -157,16 +167,23 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       setState(() {
         _recording = true;
         _recStarted = DateTime.now();
+        _recTranscript = '';
       });
-    }
-  }
-
-  Future<void> _transcribeAudio(AudioAttachment att) async {
-    final AppState app = context.read<AppState>();
-    // Расшифровка записанного файла — системным распознаванием недоступна,
-    // поэтому просим пользователя надиктовать текст либо оставить без расшифровки.
-    if (app.stt.isSupported) {
-      _toast('Аудио прикреплено. Расшифровка: надиктуйте текст кнопкой «Диктовка».');
+      // Гибридный режим: параллельно с записью распознаём речь в текст.
+      // Если микрофон не делится на этом устройстве — останется просто аудио.
+      if (app.ls.hybridEnabled && app.ls.autoTranscribe && app.stt.isSupported) {
+        if (!app.stt.isAvailable) await app.stt.init();
+        if (app.stt.isAvailable && _recording) {
+          unawaited(app.stt.start(
+            localeId: app.ls.sttLocale,
+            continuous: true,
+            onResult: (String text, bool isFinal) {
+              _recTranscript = text;
+              if (_recording && mounted) setState(() {});
+            },
+          ));
+        }
+      }
     }
   }
 
@@ -628,6 +645,16 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
                 ),
             ],
           ),
+          if (_recording && _recTranscript.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Расшифровка: $_recTranscript',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                    color: Theme.of(context).colorScheme.primary),
+              ),
+            ),
           if (_audio != null)
             ListTile(
               leading: _audio!.deleted

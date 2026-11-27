@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quickpad/data/host_database.dart';
+import 'package:quickpad/models/chat_message.dart';
 import 'package:quickpad/models/enums.dart';
+import 'package:quickpad/models/user.dart';
 import 'package:quickpad/models/note.dart';
 import 'package:quickpad/net/host_jobs.dart';
 import 'package:quickpad/net/host_server.dart';
@@ -176,6 +178,54 @@ void main() {
       final int fired = db.audit.where((e) => e.type == AuditType.reminderFired).length;
       jobs.tick();
       expect(db.audit.where((e) => e.type == AuditType.reminderFired).length, fired);
+    });
+  });
+
+  group('Пользователи', () {
+    test('имена не дублируются: повторное имя получает суффикс', () {
+      db.helloUser(userId: 'u1', userName: 'Лена', deviceId: 'd1');
+      final AppUser u2 = db.helloUser(userId: 'u2', userName: 'Лена', deviceId: 'd2');
+      expect(u2.name, 'Лена 2');
+      // И без учёта регистра.
+      final u3 = db.helloUser(userId: 'u3', userName: 'лена', deviceId: 'd3');
+      expect(u3.name, 'лена 3');
+      // Сам себе имя не «портит»: повторный вход с тем же именем не меняет его.
+      final u1again = db.helloUser(userId: 'u1', userName: 'Лена', deviceId: 'd1');
+      expect(u1again.name, 'Лена');
+    });
+  });
+
+  group('Мессенджер', () {
+    test('удаление сообщения и очистка переписки', () {
+      db.addChatMessage(ChatMessage(fromId: 'u1', toId: 'u2', text: 'раз'));
+      db.addChatMessage(ChatMessage(fromId: 'u2', toId: 'u1', text: 'два'));
+      db.addChatMessage(ChatMessage(fromId: 'u1', toId: 'u3', text: 'три'));
+      expect(db.messages.length, 3);
+
+      expect(db.deleteChatMessage(db.messages.first.id), true);
+      expect(db.messages.length, 2);
+
+      // Очистка переписки u1↔u2 не трогает чужой чат u1↔u3.
+      expect(db.clearChat('u1', 'u2'), 1);
+      expect(db.messages.length, 1);
+      expect(db.messages.single.text, 'три');
+    });
+
+    test('автоочистка по сроку хранения (0 — хранить всегда)', () {
+      final DateTime old = DateTime.now().toUtc().subtract(const Duration(days: 10));
+      db.addChatMessage(
+          ChatMessage(fromId: 'u1', toId: 'u2', text: 'старое', createdAt: old));
+      db.addChatMessage(ChatMessage(fromId: 'u1', toId: 'u2', text: 'новое'));
+      expect(db.chatRetentionSweep(DateTime.now().toUtc()), 0); // 0 дней = выкл
+      db.settings.chatKeepDays = 7;
+      expect(db.chatRetentionSweep(DateTime.now().toUtc()), 1);
+      expect(db.messages.single.text, 'новое');
+    });
+
+    test('снапшот содержит только сообщения участника', () {
+      db.addChatMessage(ChatMessage(fromId: 'u1', toId: 'u2', text: 'личное'));
+      expect((db.snapshot(forUserId: 'u3')['messages'] as List).isEmpty, true);
+      expect((db.snapshot(forUserId: 'u2')['messages'] as List).length, 1);
     });
   });
 }

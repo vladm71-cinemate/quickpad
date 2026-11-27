@@ -245,6 +245,23 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
+          ListTile(
+            title: const Text('Срок хранения сообщений, дней'),
+            subtitle: const Text('0 — хранить всегда · управляется хостом'),
+            trailing: SizedBox(
+              width: 90,
+              child: TextFormField(
+                initialValue: '${hs.chatKeepDays}',
+                enabled: app.isHost,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                onFieldSubmitted: (String v) {
+                  hs.chatKeepDays = int.tryParse(v) ?? hs.chatKeepDays;
+                  app.saveHostSettings(hs);
+                },
+              ),
+            ),
+          ),
 
           // ---------- 6.5 «Требует внимания» и напоминания (хост) ----------
           header('6.5 «Требует внимания» и напоминания'),

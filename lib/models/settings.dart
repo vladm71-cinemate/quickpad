@@ -14,6 +14,7 @@ class HostSettings {
   bool cleanupOnDone = true; // Автоочистка аудио при «Выполнена»
   bool cleanupOnRejected = false; // Автоочистка при «Отклонена/Отложена»
   int audioKeepDays = 0; // Срок хранения аудио, дней (0 — не ограничен)
+  int chatKeepDays = 0; // Срок хранения сообщений чата, дней (0 — всегда)
   bool auditEnabled = true; // Хранить журнал аудита
 
   // 6.5 Эскалация и напоминания
@@ -63,6 +64,7 @@ class HostSettings {
     cleanupOnDone = b('cleanupOnDone', cleanupOnDone);
     cleanupOnRejected = b('cleanupOnRejected', cleanupOnRejected);
     audioKeepDays = n('audioKeepDays', audioKeepDays);
+    chatKeepDays = n('chatKeepDays', chatKeepDays);
     auditEnabled = b('auditEnabled', auditEnabled);
     escalationEnabled = b('escalationEnabled', escalationEnabled);
     escalationMinutes = n('escalationMinutes', escalationMinutes);

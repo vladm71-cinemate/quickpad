@@ -96,23 +96,27 @@ class SttService {
     void Function(String status)? onStatus,
   ) async {
     final String locale = localeId.replaceAll('-', '_');
-    try {
-      final Object? started = await _stt.listen(
-        onResult: (result) => onResult(result.recognizedWords, result.finalResult),
-        listenFor: const Duration(minutes: 2),
-        pauseFor: const Duration(seconds: 8),
-        localeId: locale,
-        listenOptions: SpeechListenOptions(
-          partialResults: true,
-          cancelOnError: false,
-          onDevice: true, // системный on-device распознаватель, если есть
-          listenMode: ListenMode.confirmation,
-        ),
-      );
-      return started == true;
-    } catch (_) {
-      return false;
+    // Сначала on-device (без Google/интернета); если недоступен — обычный.
+    for (final bool onDevice in const [true, false]) {
+      try {
+        final Object? started = await _stt.listen(
+          onResult: (result) => onResult(result.recognizedWords, result.finalResult),
+          listenFor: const Duration(minutes: 2),
+          pauseFor: const Duration(seconds: 8),
+          localeId: locale,
+          listenOptions: SpeechListenOptions(
+            partialResults: true,
+            cancelOnError: false,
+            onDevice: onDevice,
+            listenMode: ListenMode.confirmation,
+          ),
+        );
+        if (started == true) return true;
+      } catch (_) {
+        // попробуем следующий вариант
+      }
     }
+    return false;
   }
 
   /// Цикл непрерывной диктовки: перезапуск после паузы/ошибки.
@@ -121,32 +125,64 @@ class SttService {
     void Function(String text, bool isFinal) onResult,
     void Function(String status)? onStatus,
   ) async {
+    bool onDevice = true; // сначала пробуем on-device (без Google и интернета)
+    int failures = 0;
     while (_sessionActive && isAvailable) {
       final String locale = localeId.replaceAll('-', '_');
+      String fragment = '';
+      bool fragmentFinal = false;
       try {
-        await _stt.listen(
+        final Object? started = await _stt.listen(
           onResult: (result) {
-            final String full = _committed.isEmpty
-                ? result.recognizedWords
-                : '$_committed ${result.recognizedWords}';
+            fragment = result.recognizedWords;
+            final String full =
+                _committed.isEmpty ? fragment : '$_committed $fragment';
             onResult(full, result.finalResult);
             if (result.finalResult) {
               _committed = full;
+              fragmentFinal = true;
             }
           },
-          listenFor: const Duration(minutes: 2),
+          listenFor: const Duration(minutes: 5),
           pauseFor: const Duration(seconds: 30),
           localeId: locale,
           listenOptions: SpeechListenOptions(
             partialResults: true,
             cancelOnError: false,
-            onDevice: true,
+            onDevice: onDevice,
             listenMode: ListenMode.dictation,
           ),
         );
+        if (started != true) {
+          // On-device недоступен на этом устройстве — дальше без него.
+          if (onDevice) {
+            onDevice = false;
+            continue;
+          }
+          failures++;
+          if (failures >= 3) {
+            _sessionActive = false;
+            break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 600));
+          continue;
+        }
+        failures = 0;
+        // ВАЖНО: движок стартует асинхронно — ждём, пока реально начнёт слушать,
+        // иначе цикл завершался мгновенно и диктовка «записывала пару слов и всё».
+        for (int i = 0; i < 30 && _sessionActive && !_stt.isListening; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
         // Ждём конца фрагмента (тишина 30 c, ошибка сети и т.п.).
         while (_sessionActive && _stt.isListening) {
-          await Future<void>.delayed(const Duration(milliseconds: 300));
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+        // Если движок закончил БЕЗ финального результата — не теряем
+        // последний кусок: фиксируем то, что успел распознать.
+        if (!fragmentFinal && fragment.isNotEmpty) {
+          _committed =
+              _committed.isEmpty ? fragment : '$_committed $fragment';
+          onResult(_committed, true);
         }
       } catch (_) {
         // Ошибка запуска — попробуем ещё раз после паузы.
@@ -154,7 +190,7 @@ class SttService {
       if (!_sessionActive) break;
       // Фрагмент закончился паузой — текст уже в _committed; перезапускаемся.
       onStatus?.call('restart');
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     onStatus?.call('done');
   }

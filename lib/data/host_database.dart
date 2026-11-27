@@ -110,6 +110,23 @@ class HostDatabase {
   // ---------- Пользователи ----------
 
   /// Регистрация/обновление пользователя при входе. Возвращает пользователя.
+  /// Уникальное имя: если такое уже занято другим пользователем,
+  /// добавляет суффикс « 2», « 3» и т.д. (без учёта регистра).
+  String _uniqueName(String name, {String? excludeUserId}) {
+    String base = name.trim();
+    if (base.isEmpty) base = 'Без имени';
+    final Set<String> taken = users.values
+        .where((u) => u.id != excludeUserId)
+        .map((u) => u.name.toLowerCase())
+        .toSet();
+    if (!taken.contains(base.toLowerCase())) return base;
+    int i = 2;
+    while (taken.contains('$base $i'.toLowerCase())) {
+      i++;
+    }
+    return '$base $i';
+  }
+
   AppUser helloUser({
     required String userId,
     required String userName,
@@ -117,19 +134,22 @@ class HostDatabase {
   }) {
     final AppUser? existing = users[userId];
     if (existing == null) {
-      final AppUser user = AppUser(id: userId, name: userName, deviceIds: [deviceId]);
+      final String unique = _uniqueName(userName);
+      final AppUser user = AppUser(id: userId, name: unique, deviceIds: [deviceId]);
       users[userId] = user;
-      _audit(null, userId, deviceId, AuditType.userChange, details: 'создан профиль «$userName»');
+      _audit(null, userId, deviceId, AuditType.userChange, details: 'создан профиль «$unique»');
       saveUsers();
       broadcast?.call({'type': 'users', 'users': users.values.map((e) => e.toJson()).toList()});
       return user;
     }
     bool changed = false;
     if (existing.name != userName && userName.isNotEmpty) {
+      // Имена не должны дублироваться: занятое имя получит суффикс.
+      final String unique = _uniqueName(userName, excludeUserId: userId);
       _audit(null, userId, deviceId, AuditType.userChange,
-          field: 'name', oldValue: existing.name, newValue: userName,
-          details: 'переименование «${existing.name}» → «$userName»');
-      existing.name = userName;
+          field: 'name', oldValue: existing.name, newValue: unique,
+          details: 'переименование «${existing.name}» → «$unique»');
+      existing.name = unique;
       changed = true;
     }
     if (!existing.deviceIds.contains(deviceId)) {
@@ -373,6 +393,38 @@ class HostDatabase {
       messages.removeRange(0, messages.length - kChatHistoryLimit);
     }
     saveMessages();
+  }
+
+  /// Удалить одно сообщение (для всех участников).
+  bool deleteChatMessage(String messageId) {
+    final int i = messages.indexWhere((m) => m.id == messageId);
+    if (i < 0) return false;
+    messages.removeAt(i);
+    saveMessages();
+    return true;
+  }
+
+  /// Очистить переписку между двумя пользователями. Возвращает число удалённых.
+  int clearChat(String userA, String userB) {
+    final int before = messages.length;
+    messages.removeWhere((m) =>
+        (m.fromId == userA && m.toId == userB) ||
+        (m.fromId == userB && m.toId == userA));
+    final int removed = before - messages.length;
+    if (removed > 0) saveMessages();
+    return removed;
+  }
+
+  /// Автоочистка старых сообщений по сроку хранения (0 — хранить всегда).
+  int chatRetentionSweep(DateTime nowUtc) {
+    final int days = settings.chatKeepDays;
+    if (days <= 0) return 0;
+    final DateTime cut = nowUtc.subtract(Duration(days: days));
+    final int before = messages.length;
+    messages.removeWhere((m) => m.createdAt.isBefore(cut));
+    final int removed = before - messages.length;
+    if (removed > 0) saveMessages();
+    return removed;
   }
 
   /// Отметить прочитанными все сообщения от [fromId] адресату [toId].

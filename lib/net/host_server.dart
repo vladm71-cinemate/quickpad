@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
@@ -192,7 +193,26 @@ class HostServer {
   void presenceWatchdog() {
     final DateTime now = DateTime.now().toUtc();
     final Set<String> onlineUsers = _sessions.values.map((s) => s.userId).toSet();
+    // Пользователь хоста — не WebSocket-клиент: он онлайн, пока работает сервер.
+    if (hostUserId.isNotEmpty) {
+      final user = db.users[hostUserId];
+      if (user != null) {
+        final bool was = user.online;
+        user.online = true;
+        user.lastSeen = now;
+        if (!was) {
+          db.saveUsers();
+          broadcast({
+            'type': MsgType.presence,
+            'userId': hostUserId,
+            'online': true,
+            'lastSeen': user.lastSeen?.toIso8601String(),
+          });
+        }
+      }
+    }
     for (final user in db.users.values) {
+      if (user.id == hostUserId) continue; // хост не гасим никогда
       if (onlineUsers.contains(user.id)) continue;
       if (user.online &&
           (user.lastSeen == null || now.difference(user.lastSeen!) > kPresenceTimeout)) {
@@ -319,6 +339,14 @@ class HostServer {
         if (!sessionReady(session)) return;
         _deliverChatRead(fromId: msg['fromId'] as String? ?? '', toId: session.userId);
         break;
+      case MsgType.chatDelete:
+        if (!sessionReady(session)) return;
+        _deleteChatMessage(msg['messageId'] as String? ?? '', byUserId: session.userId);
+        break;
+      case MsgType.chatClear:
+        if (!sessionReady(session)) return;
+        _clearChat(session.userId, msg['peerId'] as String? ?? '');
+        break;
     }
   }
 
@@ -346,6 +374,18 @@ class HostServer {
       'protocol': kProtocolVersion,
     });
     _sendSnapshot(session);
+
+    // Статус самого хоста — клиенту сразу (он не WS-клиент, watchdog его не шлёт).
+    if (hostUserId.isNotEmpty && session.userId != hostUserId) {
+      final hostUser = db.users[hostUserId];
+      _send(session, {
+        'type': MsgType.presence,
+        'userId': hostUserId,
+        'online': true,
+        'lastSeen': DateTime.now().toUtc().toIso8601String(),
+        'hostName': hostUser?.name,
+      });
+    }
 
     // Доставить отложенные уведомления.
     final List<Map<String, dynamic>> pending = _pendingNotify.remove(session.userId) ?? [];
@@ -456,6 +496,48 @@ class HostServer {
   void localChatRead({required String fromId, required String toId}) {
     _deliverChatRead(fromId: fromId, toId: toId);
   }
+
+  /// Удалить сообщение — только участник переписки может удалять.
+  void _deleteChatMessage(String messageId, {required String byUserId}) {
+    final ChatMessage? m =
+        db.messages.where((x) => x.id == messageId).firstOrNull;
+    if (m == null) return;
+    if (m.fromId != byUserId && m.toId != byUserId) return;
+    if (!db.deleteChatMessage(messageId)) return;
+    final Map<String, dynamic> event = {
+      'type': MsgType.chatDeleted,
+      'messageId': messageId,
+    };
+    for (final String uid in {m.fromId, m.toId}) {
+      if (_sessions.values.any((s) => s.userId == uid)) {
+        broadcast(event, onlyUserId: uid);
+      }
+    }
+  }
+
+  /// Очистить переписку между двумя пользователями (у обоих).
+  void _clearChat(String userA, String userB) {
+    if (userB.isEmpty) return;
+    if (db.clearChat(userA, userB) == 0) return;
+    final Map<String, dynamic> event = {
+      'type': MsgType.chatCleared,
+      'userA': userA,
+      'userB': userB,
+    };
+    for (final String uid in {userA, userB}) {
+      if (_sessions.values.any((s) => s.userId == uid)) {
+        broadcast(event, onlyUserId: uid);
+      }
+    }
+  }
+
+  /// Удаление сообщения пользователем самого хоста.
+  void localDeleteChatMessage(String messageId, {required String byUserId}) =>
+      _deleteChatMessage(messageId, byUserId: byUserId);
+
+  /// Очистка переписки пользователем самого хоста.
+  void localClearChat(String peerId, {required String myUserId}) =>
+      _clearChat(myUserId, peerId);
 
   // ---------- Локальные операции (пользователь самого хоста) ----------
 

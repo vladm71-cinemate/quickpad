@@ -21,6 +21,8 @@ class MsgType {
   static const String requestSnapshot = 'request_snapshot';
   static const String chatSend = 'chat_send';
   static const String chatRead = 'chat_read';
+  static const String chatDelete = 'chat_delete';
+  static const String chatClear = 'chat_clear';
 
   // хост → клиент
   static const String welcome = 'welcome';
@@ -34,6 +36,8 @@ class MsgType {
   static const String hostSettings = 'host_settings';
   static const String notify = 'notify';
   static const String chatMessage = 'chat_message';
+  static const String chatDeleted = 'chat_deleted';
+  static const String chatCleared = 'chat_cleared';
   static const String pong = 'pong';
 }
 
@@ -93,4 +97,12 @@ class ClientMsg {
   /// Отметить прочитанными сообщения от пользователя [fromId].
   static Map<String, dynamic> chatRead(String fromId) =>
       {'type': MsgType.chatRead, 'fromId': fromId};
+
+  /// Удалить одно сообщение.
+  static Map<String, dynamic> chatDelete(String messageId) =>
+      {'type': MsgType.chatDelete, 'messageId': messageId};
+
+  /// Очистить всю переписку с пользователем [peerId].
+  static Map<String, dynamic> chatClear(String peerId) =>
+      {'type': MsgType.chatClear, 'peerId': peerId};
 }

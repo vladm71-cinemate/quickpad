@@ -35,6 +35,7 @@ class HostJobs {
     _checkReminders(now);
     _checkEscalation(now);
     _checkAudioRetention(now);
+    _checkChatRetention(now);
   }
 
   // ---------- Напоминания ----------
@@ -162,5 +163,13 @@ class HostJobs {
         'audit': [entry.toJson()],
       });
     }
+  }
+
+  /// Автоочистка старых сообщений чата (настройка хоста, 0 — хранить всегда).
+  void _checkChatRetention(DateTime now) {
+    final int removed = db.chatRetentionSweep(now);
+    if (removed <= 0) return;
+    // Сообщения затронутых переписок пересинхронизируются снапшотом.
+    server.broadcastSnapshotToAll();
   }
 }

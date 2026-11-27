@@ -204,6 +204,32 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Удалить одно сообщение (у всех участников).
+  Future<void> deleteChatMessage(ChatMessage m) async {
+    final String? uid = currentUser?.id;
+    if (uid == null) return;
+    if (isHost) {
+      _server?.localDeleteChatMessage(m.id, byUserId: uid);
+    } else {
+      _cache?.removeChatMessage(m.id); // оптимистично
+      _client?.sendOp(ClientMsg.chatDelete(m.id));
+    }
+    notifyListeners();
+  }
+
+  /// Очистить всю переписку с [peerId] (у обоих участников).
+  Future<void> clearChat(String peerId) async {
+    final String? uid = currentUser?.id;
+    if (uid == null) return;
+    if (isHost) {
+      _server?.localClearChat(peerId, myUserId: uid);
+    } else {
+      _cache?.clearChat(uid, peerId); // оптимистично
+      _client?.sendOp(ClientMsg.chatClear(peerId));
+    }
+    notifyListeners();
+  }
+
   ConnState get connState => isHost
       ? (serverRunning ? ConnState.online : ConnState.offline)
       : (_client?.state ?? ConnState.offline);
@@ -376,6 +402,12 @@ class AppState extends ChangeNotifier {
     await _client?.stop();
     _client = ClientConnection(cache: _cache!);
     _client!.onDataChanged = () {
+      // Имя могло быть уточнено хостом (уникальность имён).
+      final String? uid = currentUser?.id;
+      final AppUser? fresh = uid == null ? null : _cache!.users[uid];
+      if (fresh != null && !identical(fresh, currentUser)) {
+        currentUser = fresh;
+      }
       syncWidget();
       notifyListeners();
     };
@@ -414,6 +446,8 @@ class AppState extends ChangeNotifier {
       await _startHostStack(); // идемпотентно: если уже запущен — сразу выйдет
       currentUser =
           _db!.helloUser(userId: id, userName: name.trim(), deviceId: device.deviceId);
+      // Хост мог уточнить имя (уникальность) — запоминаем фактическое.
+      await prefs.setString(_kUserName, currentUser!.name);
       currentUser!.online = true;
       currentUser!.lastSeen = DateTime.now().toUtc();
       _db!.saveUsers();
@@ -860,6 +894,24 @@ class AppState extends ChangeNotifier {
   // ---------- Завершение ----------
 
   Future<void> shutdown() async {
+    // Пометить пользователя хоста оффлайн до остановки сервера.
+    if (isHost && _db != null && _server != null) {
+      final String? uid = prefs.getString(_kUserId);
+      if (uid != null) {
+        final AppUser? u = _db!.users[uid];
+        if (u != null && u.online) {
+          u.online = false;
+          u.lastSeen = DateTime.now().toUtc();
+          _db!.saveUsers();
+          _server!.broadcast({
+            'type': MsgType.presence,
+            'userId': uid,
+            'online': false,
+            'lastSeen': u.lastSeen?.toIso8601String(),
+          });
+        }
+      }
+    }
     _jobs?.stop();
     _announcer?.stop();
     await _client?.stop();

@@ -84,6 +84,52 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _deleteMessage(ChatMessage m) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Удалить сообщение?'),
+        content: const Text('Сообщение будет удалено у вас и у собеседника.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Удалить')),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await context.read<AppState>().deleteChatMessage(m);
+    }
+  }
+
+  Future<void> _clearChat() async {
+    final AppState app = context.read<AppState>();
+    final String peerName = app.userName(widget.args.peerId);
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Очистить переписку?'),
+        content: Text('Все сообщения с $peerName будут удалены у вас и у собеседника.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Очистить'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await app.clearChat(widget.args.peerId);
+    }
+  }
+
   Future<void> _play(ChatMessage m) async {
     final AppState app = context.read<AppState>();
     if (_playingId == m.id) {
@@ -132,7 +178,26 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text(peerName)),
+      appBar: AppBar(
+        title: Text(peerName),
+        actions: [
+          PopupMenuButton<String>(
+            onSelected: (String v) {
+              if (v == 'clear') _clearChat();
+            },
+            itemBuilder: (BuildContext ctx) => const [
+              PopupMenuItem<String>(
+                value: 'clear',
+                child: ListTile(
+                  leading: Icon(Icons.delete_sweep_outlined),
+                  title: Text('Очистить переписку'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -198,7 +263,10 @@ class _ChatScreenState extends State<ChatScreen> {
     final Color bg = mine ? cs.primaryContainer : cs.surfaceContainerHighest;
     return Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
+      child: GestureDetector(
+        // Долгое нажатие на своё сообщение — удалить у обоих.
+        onLongPress: mine ? () => _deleteMessage(m) : null,
+        child: Container(
         margin: const EdgeInsets.symmetric(vertical: 3),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         constraints: BoxConstraints(
@@ -242,6 +310,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ?.copyWith(color: cs.onSurfaceVariant),
             ),
           ],
+        ),
         ),
       ),
     );

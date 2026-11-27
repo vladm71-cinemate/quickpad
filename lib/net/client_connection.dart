@@ -261,6 +261,15 @@ class ClientConnection extends ChangeNotifier {
             fromId: msg['fromId'] as String? ?? '', toId: msg['toId'] as String? ?? '');
         onDataChanged?.call();
         break;
+      case MsgType.chatDeleted:
+        cache.removeChatMessage(msg['messageId'] as String? ?? '');
+        onDataChanged?.call();
+        break;
+      case MsgType.chatCleared:
+        cache.clearChat(
+            msg['userA'] as String? ?? '', msg['userB'] as String? ?? '');
+        onDataChanged?.call();
+        break;
       case MsgType.pong:
         break;
     }
