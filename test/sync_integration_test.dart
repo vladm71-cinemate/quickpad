@@ -108,6 +108,17 @@ void main() {
     await a.stop();
     await b.stop();
     await server.stop();
-    await tmp.delete(recursive: true);
+    await db.flush();
+    await a.cache.flush();
+    await b.cache.flush();
+    // Windows: файлы могут быть ещё заняты — несколько попыток удаления.
+    for (int i = 0; i < 20; i++) {
+      try {
+        await tmp.delete(recursive: true);
+        break;
+      } catch (_) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+    }
   }, timeout: const Timeout(Duration(seconds: 60)));
 }
