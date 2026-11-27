@@ -21,11 +21,12 @@ subprojects {
 
 // file_picker 8.x жёстко задаёт compileSdk 34, а flutter_plugin_android_lifecycle
 // требует compileSdk >= 36 (AAR metadata check). Выравниваем compileSdk для всех модулей.
+// AGP 9: публичные расширения — новый DSL (com.android.build.api.dsl.*).
 subprojects {
     afterEvaluate {
         when (val ext = extensions.findByName("android")) {
-            is com.android.build.gradle.LibraryExtension -> ext.compileSdk = 36
-            is com.android.build.gradle.BaseAppModuleExtension -> ext.compileSdk = 36
+            is com.android.build.api.dsl.LibraryExtension -> ext.compileSdk = 36
+            is com.android.build.api.dsl.ApplicationExtension -> ext.compileSdk = 36
         }
     }
 }
