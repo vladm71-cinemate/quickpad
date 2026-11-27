@@ -19,6 +19,8 @@ class MsgType {
   static const String contactUpsert = 'contact_upsert';
   static const String contactDelete = 'contact_delete';
   static const String requestSnapshot = 'request_snapshot';
+  static const String chatSend = 'chat_send';
+  static const String chatRead = 'chat_read';
 
   // хост → клиент
   static const String welcome = 'welcome';
@@ -31,6 +33,7 @@ class MsgType {
   static const String contactDeleted = 'contact_deleted';
   static const String hostSettings = 'host_settings';
   static const String notify = 'notify';
+  static const String chatMessage = 'chat_message';
   static const String pong = 'pong';
 }
 
@@ -82,4 +85,12 @@ class ClientMsg {
       {'type': MsgType.contactDelete, 'contactId': contactId};
 
   static Map<String, dynamic> requestSnapshot() => {'type': MsgType.requestSnapshot};
+
+  /// Личное сообщение пользователю [toId] (текст и/или голосовое).
+  static Map<String, dynamic> chatSend(Map<String, dynamic> messageJson) =>
+      {'type': MsgType.chatSend, 'message': messageJson};
+
+  /// Отметить прочитанными сообщения от пользователя [fromId].
+  static Map<String, dynamic> chatRead(String fromId) =>
+      {'type': MsgType.chatRead, 'fromId': fromId};
 }

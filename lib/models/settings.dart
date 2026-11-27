@@ -99,6 +99,7 @@ class LocalSettings {
   bool notifChanges = true; // Уведомления об изменениях чужих заявок
   bool notifReminders = true; // Уведомления о напоминаниях
   bool notifEscalation = true; // Уведомления об эскалации
+  bool notifChat = true; // Уведомления о личных сообщениях
   bool soundNew = true; // Звук для новых заявок
   bool soundReminder = true; // Звук для напоминаний/эскалации
   bool dnd = false; // «Не беспокоить»
@@ -178,6 +179,7 @@ class LocalSettings {
         'notifChanges': (s) => s.notifChanges,
         'notifReminders': (s) => s.notifReminders,
         'notifEscalation': (s) => s.notifEscalation,
+        'notifChat': (s) => s.notifChat,
         'soundNew': (s) => s.soundNew,
         'soundReminder': (s) => s.soundReminder,
         'dnd': (s) => s.dnd,
@@ -218,6 +220,7 @@ class LocalSettings {
         'notifChanges': (s, v) => s.notifChanges = v,
         'notifReminders': (s, v) => s.notifReminders = v,
         'notifEscalation': (s, v) => s.notifEscalation = v,
+        'notifChat': (s, v) => s.notifChat = v,
         'soundNew': (s, v) => s.soundNew = v,
         'soundReminder': (s, v) => s.soundReminder = v,
         'dnd': (s, v) => s.dnd = v,

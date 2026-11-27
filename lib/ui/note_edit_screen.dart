@@ -10,6 +10,7 @@ import '../core/timefmt.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
+import '../models/user.dart';
 import '../services/audio_service.dart';
 import '../state/app_state.dart';
 import 'stt_helper.dart';
@@ -119,10 +120,10 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     setState(() => _dictating = true);
     final bool ok = await app.stt.start(
       localeId: app.ls.sttLocale,
+      continuous: true, // не отключается на паузах: перезапускается само
       onResult: (String text, bool isFinal) {
         _textCtl.text = text;
         _textCtl.selection = TextSelection.collapsed(offset: text.length);
-        if (isFinal && mounted) setState(() => _dictating = false);
       },
     );
     if (!ok && mounted) setState(() => _dictating = false);
@@ -276,6 +277,87 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     );
     if (picked == null || !mounted) return;
     setState(() => _contactId = picked.id.isEmpty ? null : picked.id);
+  }
+
+  /// Выбор исполнителя с поиском по вхождению — как выбор контакта.
+  Future<void> _pickAssignee() async {
+    final AppState app = context.read<AppState>();
+    String q = '';
+    final List<AppUser> sorted = List<AppUser>.from(app.users)
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    List<AppUser> rank() {
+      final String query = q.trim().toLowerCase();
+      if (query.isEmpty) return sorted;
+      final List<MapEntry<AppUser, int>> scored = [];
+      for (final AppUser u in sorted) {
+        final int pos = u.name.toLowerCase().indexOf(query);
+        if (pos >= 0) scored.add(MapEntry(u, pos));
+      }
+      scored.sort((a, b) => a.value.compareTo(b.value));
+      return scored.map((e) => e.key).toList();
+    }
+
+    final AppUser? picked = await showDialog<AppUser>(
+      context: context,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setDlg) => AlertDialog(
+          title: const Text('Выбор исполнителя'),
+          content: SizedBox(
+            width: 400,
+            height: 380,
+            child: Column(
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Имя…',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (String v) => setDlg(() => q = v),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Builder(builder: (BuildContext ctx) {
+                    final List<AppUser> list = rank();
+                    if (list.isEmpty) {
+                      return const Center(child: Text('Ничего не найдено'));
+                    }
+                    return ListView.builder(
+                      itemCount: list.length,
+                      itemBuilder: (BuildContext ctx, int i) {
+                        final AppUser u = list[i];
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(Icons.person_outline,
+                              color: u.online ? Colors.green : null),
+                          title: Text(u.name),
+                          subtitle: u.online ? const Text('в сети') : null,
+                          onTap: () => Navigator.pop(ctx, u),
+                        );
+                      },
+                    );
+                  }),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (_assigneeId != null)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, AppUser(id: '', name: '')),
+                child: const Text('Убрать исполнителя'),
+              ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _assigneeId = picked.id.isEmpty ? null : picked.id);
   }
 
   // ---------- Выбор даты/времени ----------
@@ -504,6 +586,16 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Дата и время создания проставляются автоматически.
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _isNew
+                  ? 'Создаётся: ${formatDateTime(DateTime.now())}'
+                  : 'Создана: ${formatDateTime(_original!.createdAt)} · ${app.userName(_original!.authorId)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
           TextField(
             controller: _textCtl,
             minLines: 3,
@@ -570,15 +662,12 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
             const SizedBox(height: 12),
           ],
           _section('Исполнитель'),
-          DropdownButtonFormField<String>(
-            initialValue: _assigneeId,
-            decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-            hint: const Text('Не назначен'),
-            items: [
-              const DropdownMenuItem<String>(value: '', child: Text('Не назначен')),
-              ...app.users.map((u) => DropdownMenuItem<String>(value: u.id, child: Text(u.name))),
-            ],
-            onChanged: (String? v) => setState(() => _assigneeId = (v == null || v.isEmpty) ? null : v),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.person_search),
+            label: Text(_assigneeId == null
+                ? 'Выбрать исполнителя (с поиском)'
+                : app.userName(_assigneeId!)),
+            onPressed: _pickAssignee,
           ),
           const SizedBox(height: 12),
           _section('Приоритет'),

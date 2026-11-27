@@ -4,6 +4,7 @@ import 'dart:io';
 import '../core/constants.dart';
 import '../core/ids.dart';
 import '../models/audit_entry.dart';
+import '../models/chat_message.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
@@ -44,6 +45,7 @@ class HostDatabase {
   final Map<String, Contact> contacts = {};
   final Map<String, Pin> pins = {};
   final List<AuditEntry> audit = [];
+  final List<ChatMessage> messages = [];
   HostSettings settings = HostSettings();
 
   /// Колбэк: хост рассылает событие клиентам. Устанавливает HostServer.
@@ -81,6 +83,11 @@ class HostDatabase {
     }
     final Map<String, dynamic>? s = await _store.readMap('host_settings.json');
     if (s != null) settings.applyJson(s);
+
+    final List<dynamic> m = await _store.readList('messages.json');
+    for (final Object? e in m) {
+      messages.add(ChatMessage.fromJson((e as Map).cast<String, dynamic>()));
+    }
   }
 
   // ---------- Сохранение ----------
@@ -90,6 +97,7 @@ class HostDatabase {
   void saveContacts() => _save('contacts.json', contacts.values.map((e) => e.toJson()).toList());
   void savePins() => _save('pins.json', pins.values.map((e) => e.toJson()).toList());
   void saveAudit() => _save('audit.json', audit.map((e) => e.toJson()).toList());
+  void saveMessages() => _save('messages.json', messages.map((e) => e.toJson()).toList());
   void saveSettings() => unawaited(_store.writeNow('host_settings.json', settings.toJson()));
 
   void _save(String name, List<Map<String, dynamic>> items) {
@@ -356,12 +364,44 @@ class HostDatabase {
     });
   }
 
+  // ---------- Мессенджер ----------
+
+  /// Добавить личное сообщение. История ограничена [kChatHistoryLimit].
+  void addChatMessage(ChatMessage msg) {
+    messages.add(msg);
+    if (messages.length > kChatHistoryLimit) {
+      messages.removeRange(0, messages.length - kChatHistoryLimit);
+    }
+    saveMessages();
+  }
+
+  /// Отметить прочитанными все сообщения от [fromId] адресату [toId].
+  /// Возвращает true, если хоть одно сообщение изменилось.
+  bool markChatRead({required String fromId, required String toId}) {
+    bool changed = false;
+    final DateTime now = DateTime.now().toUtc();
+    for (final ChatMessage m in messages) {
+      if (m.fromId == fromId && m.toId == toId && m.readAt == null) {
+        m.readAt = now;
+        changed = true;
+      }
+    }
+    if (changed) saveMessages();
+    return changed;
+  }
+
   // ---------- Снапшот для клиента ----------
 
-  Map<String, dynamic> snapshot() {
+  Map<String, dynamic> snapshot({String? forUserId}) {
     final List<AuditEntry> recent = audit.length > kAuditSnapshotLimit
         ? audit.sublist(audit.length - kAuditSnapshotLimit)
         : audit;
+    // Личные сообщения — только те, где клиент участник.
+    final List<ChatMessage> chat = forUserId == null
+        ? messages
+        : messages
+            .where((m) => m.fromId == forUserId || m.toId == forUserId)
+            .toList();
     return {
       'notes': notes.values.map((e) => e.toJson()).toList(),
       'users': users.values.map((e) => e.toJson()).toList(),
@@ -369,6 +409,7 @@ class HostDatabase {
       'pins': pins.values.map((e) => e.toJson()).toList(),
       'audit': recent.map((e) => e.toJson()).toList(),
       'hostSettings': settings.toJson(),
+      'messages': chat.map((e) => e.toJson()).toList(),
     };
   }
 }

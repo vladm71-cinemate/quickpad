@@ -76,6 +76,9 @@ class NotificationService {
       case NotifyKind.reminder:
         if (!s.notifReminders) return;
         break;
+      case NotifyKind.chat:
+        if (!s.notifChat) return;
+        break;
       case NotifyKind.escalation:
         if (!s.notifEscalation) return;
         break;

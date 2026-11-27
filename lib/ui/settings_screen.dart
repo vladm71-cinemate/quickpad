@@ -179,6 +179,7 @@ class SettingsScreen extends StatelessWidget {
           flag('notifChanges', 'Изменения заявок (уведомлять о каждой правке)'),
           flag('notifReminders', 'Напоминания'),
           flag('notifEscalation', '«Требует внимания» (нет реакции на заявку)'),
+          flag('notifChat', 'Личные сообщения'),
           flag('soundNew', 'Звук для новых заявок'),
           flag('soundReminder', 'Звук для напоминаний и «Требует внимания»'),
           flag('dnd', 'Не беспокоить'),

@@ -14,6 +14,7 @@ import '../data/backup_service.dart';
 import '../data/host_database.dart';
 import '../data/local_cache.dart';
 import '../models/audit_entry.dart';
+import '../models/chat_message.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
@@ -30,6 +31,7 @@ import '../services/audio_service.dart';
 import '../services/device_info.dart';
 import '../services/notification_service.dart';
 import '../services/stt_service.dart';
+import '../services/widget_service.dart';
 import 'settings_controller.dart';
 
 /// Сводка дня (ТЗ 4.4): Новых / В работе / Выполнено сегодня / Просрочено.
@@ -73,6 +75,7 @@ class AppState extends ChangeNotifier {
   final NotificationService notifications = NotificationService();
   final SttService stt = SttService();
   final AudioService audio = AudioService();
+  final WidgetService _widget = WidgetService();
 
   late final Directory baseDir;
   late final DeviceIdentity device;
@@ -123,6 +126,84 @@ class AppState extends ChangeNotifier {
   List<AuditEntry> get audit =>
       isHost ? (_db?.audit ?? const []) : (_cache?.audit ?? const []);
 
+  // ---------- Мессенджер ----------
+
+  /// Все видимые мне сообщения (на хосте — только мои чаты).
+  List<ChatMessage> get messages {
+    final String? uid = currentUser?.id;
+    final List<ChatMessage> all =
+        isHost ? (_db?.messages ?? []) : (_cache?.messages ?? []);
+    if (uid == null) return const [];
+    return all.where((m) => m.fromId == uid || m.toId == uid).toList();
+  }
+
+  /// Переписка с конкретным пользователем, по времени.
+  List<ChatMessage> chatWith(String peerId) {
+    final String? uid = currentUser?.id;
+    if (uid == null) return const [];
+    final List<ChatMessage> list = messages
+        .where((m) =>
+            (m.fromId == uid && m.toId == peerId) ||
+            (m.fromId == peerId && m.toId == uid))
+        .toList();
+    list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return list;
+  }
+
+  /// Непрочитанные от [peerId] мне.
+  int unreadFrom(String peerId) {
+    final String? uid = currentUser?.id;
+    if (uid == null) return 0;
+    return messages
+        .where((m) => m.fromId == peerId && m.toId == uid && m.readAt == null)
+        .length;
+  }
+
+  /// Всего непрочитанных (для бейджа на кнопке).
+  int get unreadChatTotal {
+    final String? uid = currentUser?.id;
+    if (uid == null) return 0;
+    return messages.where((m) => m.toId == uid && m.readAt == null).length;
+  }
+
+  /// Пользователи, с которыми можно переписываться (все, кроме меня),
+  /// с последним сообщением для сортировки/превью.
+  List<AppUser> get chatPeers => users.where((u) => u.id != currentUser?.id).toList();
+
+  /// Отправить текстовое или голосовое сообщение пользователю [toId].
+  Future<ChatMessage> sendChatMessage(String toId,
+      {String text = '', AudioAttachment? audio}) async {
+    final AppUser me = currentUser!;
+    final ChatMessage m = ChatMessage(
+      fromId: me.id,
+      toId: toId,
+      text: text.trim(),
+      audioFileName: audio?.fileName,
+      audioDurationSec: audio?.durationSec,
+    );
+    if (isHost) {
+      _server?.localSendChat(m);
+    } else {
+      _client?.sendOp(ClientMsg.chatSend(m.toJson()));
+      _cache?.applyChatMessage(m); // оптимистично
+    }
+    notifyListeners();
+    return m;
+  }
+
+  /// Отметить переписку с [peerId] прочитанной.
+  Future<void> markChatRead(String peerId) async {
+    final String? uid = currentUser?.id;
+    if (uid == null) return;
+    if (isHost) {
+      _server?.localChatRead(fromId: peerId, toId: uid);
+    } else {
+      _cache?.applyChatRead(fromId: peerId, toId: uid); // оптимистично
+      _client?.sendOp(ClientMsg.chatRead(peerId), queueIfOffline: false);
+    }
+    notifyListeners();
+  }
+
   ConnState get connState => isHost
       ? (serverRunning ? ConnState.online : ConnState.offline)
       : (_client?.state ?? ConnState.offline);
@@ -130,6 +211,54 @@ class AppState extends ChangeNotifier {
   int get queuedCount => _cache?.outbox.length ?? 0;
   String get hostAddress => prefs.getString(_kHostAddr) ?? '';
   int get hostPort => prefs.getInt(_kHostPort) ?? kHostPort;
+
+  // ---------- Виджет рабочего стола (Android) ----------
+
+  Timer? _widgetTimer;
+
+  /// Отложенное обновление виджета: закреплённая заявка (первая по порядку),
+  /// иначе — последняя по времени изменения. Размер виджета настраивает
+  /// пользователь на рабочем столе (ресайз включён).
+  void syncWidget() {
+    if (!(Platform.isAndroid)) return;
+    _widgetTimer?.cancel();
+    _widgetTimer = Timer(const Duration(milliseconds: 700), () {
+      Note? shown;
+      bool pinned = false;
+      for (final Pin p in myPins) {
+        final Note? n = noteById(p.noteId);
+        if (n != null &&
+            n.status != NoteStatus.done &&
+            n.status != NoteStatus.rejected) {
+          shown = n;
+          pinned = true;
+          break;
+        }
+      }
+      if (shown == null) {
+        final List<Note> active = notes
+            .where((n) =>
+                n.status != NoteStatus.done && n.status != NoteStatus.rejected)
+            .toList()
+          ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        if (active.isNotEmpty) shown = active.first;
+      }
+      shown ??= notes.isEmpty
+          ? null
+          : (List<Note>.from(notes)
+            ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt)))
+              .first;
+      if (shown == null) {
+        unawaited(_widget.update(status: '', text: '', meta: ''));
+        return;
+      }
+      final String status =
+          '${pinned ? '📌 ' : ''}${shown.status.label}${shown.isOverdue() ? ' · просрочена' : ''}';
+      final String meta =
+          '${userName(shown.authorId)} · ${formatRelative(shown.updatedAt)}';
+      unawaited(_widget.update(status: status, text: shown.text, meta: meta));
+    });
+  }
 
   String get connectionLabel {
     if (isHost) return serverRunning ? 'Хост запущен (порт $kHostPort)' : 'Хост остановлен';
@@ -173,6 +302,7 @@ class AppState extends ChangeNotifier {
     }
 
     ready = true;
+    syncWidget();
     notifyListeners();
   }
 
@@ -227,6 +357,7 @@ class AppState extends ChangeNotifier {
         unawaited(notifications.showFromHost(msg, ls));
       }
     }
+    syncWidget();
     notifyListeners();
   }
 
@@ -244,7 +375,10 @@ class AppState extends ChangeNotifier {
 
     await _client?.stop();
     _client = ClientConnection(cache: _cache!);
-    _client!.onDataChanged = notifyListeners;
+    _client!.onDataChanged = () {
+      syncWidget();
+      notifyListeners();
+    };
     _client!.onNotify = (Map<String, dynamic> msg) {
       // Не уведомляем автора о его собственных правках.
       if (msg['actorId'] != null && msg['actorId'] == currentUser?.id) return;
@@ -409,6 +543,7 @@ class AppState extends ChangeNotifier {
       _client?.sendOp(ClientMsg.noteCreate(note));
       _cache?.applyNoteUpsert(note); // оптимистично, хост пришлёт авторитетную версию
     }
+    syncWidget();
     notifyListeners();
     return note;
   }
@@ -450,6 +585,7 @@ class AppState extends ChangeNotifier {
         _cache?.saveNotes();
       }
     }
+    syncWidget();
     notifyListeners();
   }
 
@@ -493,6 +629,7 @@ class AppState extends ChangeNotifier {
         _cache?.removePin(me.id, note.id);
       }
     }
+    syncWidget();
     notifyListeners();
     // Мягкий лимит 20: только предупреждение, не блокируем (ТЗ 12).
     if (pinned && myPins.length > kPinSoftLimit) {

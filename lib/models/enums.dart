@@ -78,6 +78,7 @@ enum NotifyKind {
   reminder('reminder'),
   escalation('escalation'),
   conflict('conflict'),
+  chat('chat'),
   audioDeleted('audio_deleted');
 
   const NotifyKind(this.wire);

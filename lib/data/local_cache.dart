@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../core/constants.dart';
 import '../models/audit_entry.dart';
+import '../models/chat_message.dart';
 import '../models/contact.dart';
 import '../models/note.dart';
 import '../models/pin.dart';
@@ -23,6 +24,7 @@ class LocalCache {
   final Map<String, Contact> contacts = {};
   final Map<String, Pin> pins = {};
   final List<AuditEntry> audit = [];
+  final List<ChatMessage> messages = [];
   HostSettings hostSettings = HostSettings();
 
   /// Очередь исходящих операций (JSON-сообщения протокола).
@@ -49,6 +51,9 @@ class LocalCache {
     for (final Object? e in await _store.readList('audit.json')) {
       audit.add(AuditEntry.fromJson((e as Map).cast<String, dynamic>()));
     }
+    for (final Object? e in await _store.readList('messages.json')) {
+      messages.add(ChatMessage.fromJson((e as Map).cast<String, dynamic>()));
+    }
     final Map<String, dynamic>? hs = await _store.readMap('host_settings.json');
     if (hs != null) hostSettings.applyJson(hs);
     for (final Object? e in await _store.readList('outbox.json')) {
@@ -56,6 +61,7 @@ class LocalCache {
     }
   }
 
+  void saveMessages() => _save('messages.json', messages.map((e) => e.toJson()).toList());
   void saveNotes() => _save('notes.json', notes.values.map((e) => e.toJson()).toList());
   void saveUsers() => _save('users.json', users.values.map((e) => e.toJson()).toList());
   void saveContacts() => _save('contacts.json', contacts.values.map((e) => e.toJson()).toList());
@@ -104,6 +110,11 @@ class LocalCache {
           .map((e) => AuditEntry.fromJson((e as Map).cast<String, dynamic>())));
     final Object? hs = s['hostSettings'];
     if (hs is Map) hostSettings.applyJson(hs.cast<String, dynamic>());
+    // Снапшот содержит только сообщения с участием этого пользователя.
+    messages
+      ..clear()
+      ..addAll((s['messages'] as List? ?? [])
+          .map((e) => ChatMessage.fromJson((e as Map).cast<String, dynamic>())));
     saveAll();
   }
 
@@ -170,7 +181,35 @@ class LocalCache {
     saveHostSettings();
   }
 
+  /// Новое/изменённое сообщение (live-событие от хоста).
+  void applyChatMessage(ChatMessage m) {
+    final int i = messages.indexWhere((x) => x.id == m.id);
+    if (i >= 0) {
+      messages[i] = m;
+    } else {
+      messages.add(m);
+      if (messages.length > kChatHistoryLimit) {
+        messages.removeRange(0, messages.length - kChatHistoryLimit);
+      }
+    }
+    saveMessages();
+  }
+
+  /// Отметить прочитанными входящие от [fromId] (локально, до ответа хоста).
+  void applyChatRead({required String fromId, required String toId}) {
+    bool changed = false;
+    final DateTime now = DateTime.now().toUtc();
+    for (final ChatMessage m in messages) {
+      if (m.fromId == fromId && m.toId == toId && m.readAt == null) {
+        m.readAt = now;
+        changed = true;
+      }
+    }
+    if (changed) saveMessages();
+  }
+
   void saveAll() {
+    saveMessages();
     saveNotes();
     saveUsers();
     saveContacts();

@@ -9,6 +9,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../core/constants.dart';
 import '../data/local_cache.dart';
 import '../models/audit_entry.dart';
+import '../models/chat_message.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
@@ -246,6 +247,19 @@ class ClientConnection extends ChangeNotifier {
         break;
       case MsgType.notify:
         onNotify?.call(msg);
+        break;
+      case MsgType.chatMessage:
+        final Object? m = msg['message'];
+        if (m is Map) {
+          cache.applyChatMessage(ChatMessage.fromJson(m.cast<String, dynamic>()));
+          onDataChanged?.call();
+        }
+        break;
+      case MsgType.chatRead:
+        // Пользователь toId прочитал сообщения от fromId — отметить их прочитанными.
+        cache.applyChatRead(
+            fromId: msg['fromId'] as String? ?? '', toId: msg['toId'] as String? ?? '');
+        onDataChanged?.call();
         break;
       case MsgType.pong:
         break;

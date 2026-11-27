@@ -35,9 +35,11 @@ Future<void> showSttError(BuildContext context, SttService stt) async {
       break;
     case 'no_recognizer':
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          duration: Duration(seconds: 5),
-          content: Text('На устройстве не найден сервис распознавания речи. '
-              'Установите/включите приложение «Google» и проверьте интернет.')));
+          duration: Duration(seconds: 6),
+          content: Text('На телефоне нет службы распознавания речи. '
+              'Но вы можете диктовать кнопкой микрофона на КЛАВИАТУРЕ — '
+              'она работает: поставьте курсор в текст и нажмите её. '
+              'Либо включите/обновите приложение «Google».')));
       break;
     default:
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(

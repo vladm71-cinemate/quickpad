@@ -273,6 +273,18 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Icon(_listening ? Icons.mic : Icons.mic_none),
             ),
           const SizedBox(height: 12),
+          // Локальный мессенджер: список пользователей → переписка.
+          FloatingActionButton.small(
+            heroTag: 'chat',
+            onPressed: () => Navigator.of(context).pushNamed('/chats'),
+            tooltip: 'Сообщения',
+            child: Badge(
+              isLabelVisible: app.unreadChatTotal > 0,
+              label: Text('${app.unreadChatTotal}'),
+              child: const Icon(Icons.send_rounded),
+            ),
+          ),
+          const SizedBox(height: 12),
           FloatingActionButton.extended(
             heroTag: 'add',
             onPressed: () =>
@@ -405,7 +417,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         runSpacing: 2,
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Text('${app.userName(n.authorId)} · ${formatRelative(n.createdAt)}',
+                          Text(
+                              '${app.userName(n.authorId)} · ${formatDateTime(n.createdAt)} (${formatRelative(n.createdAt)})',
                               style: Theme.of(context).textTheme.bodySmall),
                           if (n.deadline != null)
                             Text('Срок: ${formatDeadline(n.deadline!)}',
@@ -460,6 +473,14 @@ class _HomeScreenState extends State<HomeScreen> {
             accountName: Text(app.currentUser?.name ?? 'Без имени'),
             accountEmail: Text(app.connectionLabel),
             currentAccountPicture: const CircleAvatar(child: Icon(Icons.person)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.send_rounded),
+            title: const Text('Сообщения'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.of(context).pushNamed('/chats');
+            },
           ),
           ListTile(
             leading: const Icon(Icons.archive_outlined),

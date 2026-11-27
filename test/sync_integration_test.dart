@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quickpad/data/host_database.dart';
 import 'package:quickpad/data/local_cache.dart';
+import 'package:quickpad/models/chat_message.dart';
 import 'package:quickpad/models/enums.dart';
 import 'package:quickpad/models/note.dart';
 import 'package:quickpad/net/client_connection.dart';
@@ -81,6 +82,28 @@ void main() {
 
     // Уведомление о новой заявке пришло Пете.
     // (onNotify вызывается при note_create от другого пользователя)
+
+    // ---------- Мессенджер ----------
+    // Лена пишет Пете личное сообщение → доходит live, у Лены оно тоже есть.
+    final ChatMessage chat =
+        ChatMessage(fromId: 'uA', toId: 'uB', text: 'Принеси картриджи на 2 этаж');
+    a.sendOp(ClientMsg.chatSend(chat.toJson()));
+    await waitFor(
+        () => b.cache.messages.any((m) => m.text.contains('2 этаж')), 'chat to B');
+    await waitFor(
+        () => a.cache.messages.any((m) => m.text.contains('2 этаж')), 'chat echo to A');
+    expect(b.cache.messages.last.toId, 'uB');
+    // Третьего пользователя нет — но проверим приватность снапшота:
+    // сообщение uA→uB не должно попадать в чужой снапшот.
+    final Map<String, dynamic> snapC = db.snapshot(forUserId: 'uC');
+    expect((snapC['messages'] as List).isEmpty, true);
+    final Map<String, dynamic> snapB = db.snapshot(forUserId: 'uB');
+    expect((snapB['messages'] as List).length, 1);
+
+    // Петя прочитал → у Лены сообщение становится прочитанным (✓✓).
+    b.sendOp(ClientMsg.chatRead('uA'));
+    await waitFor(
+        () => a.cache.messages.any((m) => m.readAt != null), 'read receipt');
 
     await a.stop();
     await b.stop();

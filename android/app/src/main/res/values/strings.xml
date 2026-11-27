@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Быстрый блокнот заявок</string>
-    <string name="widget_quick_add">Быстрая заметка</string>
-    <string name="widget_desc">Создание заявки в одно нажатие</string>
+    <string name="widget_quick_add">Новая заявка</string>
+    <string name="widget_desc">Последняя или закреплённая заявка и быстрое создание</string>
+    <string name="widget_title">Быстрый блокнот</string>
+    <string name="widget_empty">Заявок пока нет — нажмите «+», чтобы создать</string>
 </resources>

@@ -6,6 +6,8 @@ import 'core/constants.dart';
 import 'state/app_state.dart';
 import 'state/settings_controller.dart';
 import 'ui/audit_screen.dart';
+import 'ui/chat_list_screen.dart';
+import 'ui/chat_screen.dart';
 import 'ui/contacts_screen.dart';
 import 'ui/help_screen.dart';
 import 'ui/home_screen.dart';
@@ -71,6 +73,12 @@ class _QuickPadAppState extends State<QuickPadApp> {
             break;
           case '/users':
             page = const UsersScreen();
+            break;
+          case '/chats':
+            page = const ChatListScreen();
+            break;
+          case '/chat':
+            page = ChatScreen(args: rs.arguments as ChatArgs);
             break;
           case '/settings':
             page = const SettingsScreen();

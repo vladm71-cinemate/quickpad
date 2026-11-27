@@ -11,6 +11,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../core/constants.dart';
 import '../data/host_database.dart';
 import '../models/audit_entry.dart';
+import '../models/chat_message.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
@@ -156,10 +157,12 @@ class HostServer {
   }
 
   /// Уведомление конкретному пользователю; если оффлайн — в очередь.
+  /// Идёт через db.broadcast: тот же канал, что и остальные события, —
+  /// обёртка приложения хоста покажет уведомление и локально на хосте.
   void notifyUser(String userId, Map<String, dynamic> msg) {
     final bool online = _sessions.values.any((s) => s.userId == userId);
     if (online) {
-      broadcast(msg, onlyUserId: userId);
+      (db.broadcast ?? broadcast)(msg, onlyUserId: userId);
     } else {
       final List<Map<String, dynamic>> q = _pendingNotify.putIfAbsent(userId, () => []);
       q.add(msg);
@@ -306,6 +309,16 @@ class HostServer {
       case MsgType.requestSnapshot:
         _sendSnapshot(session);
         break;
+      case MsgType.chatSend:
+        if (!sessionReady(session)) return;
+        final ChatMessage chatMsg =
+            ChatMessage.fromJson((msg['message'] as Map).cast<String, dynamic>());
+        _deliverChat(chatMsg);
+        break;
+      case MsgType.chatRead:
+        if (!sessionReady(session)) return;
+        _deliverChatRead(fromId: msg['fromId'] as String? ?? '', toId: session.userId);
+        break;
     }
   }
 
@@ -343,7 +356,7 @@ class HostServer {
   }
 
   void _sendSnapshot(ClientSession session) {
-    final Map<String, dynamic> snap = db.snapshot();
+    final Map<String, dynamic> snap = db.snapshot(forUserId: session.userId);
     snap['type'] = MsgType.snapshot;
     _send(session, snap);
   }
@@ -369,7 +382,8 @@ class HostServer {
       return '$f: «${e.oldValue ?? '—'}» → «${e.newValue ?? '—'}»';
     }).toList();
     if (updates.length > 3) parts.add('…');
-    broadcast({
+    // Через db.broadcast: уведомление увидят и клиенты, и сам хост локально.
+    (db.broadcast ?? broadcast)({
       'type': MsgType.notify,
       'kind': NotifyKind.noteChanged.wire,
       'noteId': r.note!.id,
@@ -383,13 +397,64 @@ class HostServer {
   void _notifyContactChange(String? actorId, String? details) {
     if (details == null) return;
     final String who = actorId != null ? db.userName(actorId) : '';
-    broadcast({
+    (db.broadcast ?? broadcast)({
       'type': MsgType.notify,
       'kind': NotifyKind.noteChanged.wire,
       'actorId': actorId,
       'title': 'Контакты',
       'body': '${who.isEmpty ? 'Пользователь' : who}: $details',
     });
+  }
+
+  // ---------- Мессенджер ----------
+
+  /// Принять и доставить личное сообщение: обоим участникам (live) +
+  /// уведомление получателю (или в оффлайн-очередь).
+  void _deliverChat(ChatMessage m) {
+    db.addChatMessage(m);
+    final Map<String, dynamic> event = {'type': MsgType.chatMessage, 'message': m.toJson()};
+    // Отправителю (все его устройства) и получателю.
+    for (final String uid in {m.fromId, m.toId}) {
+      if (_sessions.values.any((s) => s.userId == uid)) {
+        broadcast(event, onlyUserId: uid);
+      }
+    }
+    // Уведомление получателю — через db.broadcast, чтобы хост тоже увидел локально.
+    final String preview =
+        m.text.isNotEmpty ? m.text : '🎤 Голосовое сообщение (${m.audioDurationSec ?? 0} c)';
+    notifyUser(m.toId, {
+      'type': MsgType.notify,
+      'kind': NotifyKind.chat.wire,
+      'actorId': m.fromId,
+      'title': 'Сообщение от ${db.userName(m.fromId)}',
+      'body': preview.length > 120 ? '${preview.substring(0, 120)}…' : preview,
+    });
+  }
+
+  /// Получатель прочитал переписку: отметить и сообщить отправителю.
+  void _deliverChatRead({required String fromId, required String toId}) {
+    if (fromId.isEmpty || toId.isEmpty) return;
+    if (db.markChatRead(fromId: fromId, toId: toId)) {
+      final Map<String, dynamic> event = {
+        'type': MsgType.chatRead,
+        'fromId': fromId,
+        'toId': toId,
+      };
+      for (final String uid in {fromId, toId}) {
+        if (_sessions.values.any((s) => s.userId == uid)) {
+          broadcast(event, onlyUserId: uid);
+        }
+      }
+      // Локальный UI хоста обновится сам: markChatRead → saveMessages → onDataChanged.
+    }
+  }
+
+  /// Отправка сообщения пользователем самого хоста.
+  void localSendChat(ChatMessage m) => _deliverChat(m);
+
+  /// Пользователь хоста прочитал переписку.
+  void localChatRead({required String fromId, required String toId}) {
+    _deliverChatRead(fromId: fromId, toId: toId);
   }
 
   // ---------- Локальные операции (пользователь самого хоста) ----------
