@@ -1,0 +1,64 @@
+name: quickpad
+description: "Быстрый блокнот заявок — локальный обмен заявками и заметками в Wi-Fi сети (Android + Windows)."
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.7.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Состояние и утилиты
+  provider: ^6.1.2
+  shared_preferences: ^2.3.3
+  path_provider: ^2.1.4
+  uuid: ^4.5.1
+  intl: ^0.20.2
+  collection: ^1.19.0
+
+  # Сеть: хост (HTTP + WebSocket) и клиент
+  shelf: ^1.4.2
+  shelf_router: ^1.1.4
+  shelf_web_socket: ^3.0.0
+  web_socket_channel: ^3.0.1
+  http: ^1.2.2
+  connectivity_plus: ^6.1.0
+
+  # Голос и аудио
+  speech_to_text: ^7.0.0
+  record: ^6.0.0
+  audioplayers: ^6.0.0
+  permission_handler: ^11.3.1
+
+  # Уведомления
+  flutter_local_notifications: ^17.2.3
+  local_notifier: ^0.1.6
+
+  # Прочее UI
+  flutter_colorpicker: ^1.1.0
+  file_picker: ^8.1.2
+  url_launcher: ^6.3.0
+  device_info_plus: ^11.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
+
+# Генерация иконок: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/icon.png"
+  android: true
+  min_sdk_android: 24
+  windows:
+    generate: true
+    image_path: "assets/icon.png"
+    icon_size: 256
+
+flutter:
+  uses-material-design: true

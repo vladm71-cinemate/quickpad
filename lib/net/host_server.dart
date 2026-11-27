@@ -1,0 +1,428 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:shelf/shelf.dart';
+import 'package:shelf/shelf_io.dart' as shelf_io;
+import 'package:shelf_router/shelf_router.dart';
+import 'package:shelf_web_socket/shelf_web_socket.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
+
+import '../core/constants.dart';
+import '../data/host_database.dart';
+import '../models/audit_entry.dart';
+import '../models/contact.dart';
+import '../models/note.dart';
+import '../models/pin.dart';
+import 'protocol.dart';
+
+/// Сессия подключённого клиента.
+class ClientSession {
+  ClientSession({required this.channel});
+
+  final WebSocketChannel channel;
+  String userId = '';
+  String userName = '';
+  String deviceId = '';
+  String deviceName = '';
+  DateTime lastPing = DateTime.now().toUtc();
+}
+
+/// Сервер хоста (ТЗ, раздел 2 — хост на Windows-ПК):
+/// WebSocket для реального времени + HTTP для аудиофайлов и проверки связи.
+class HostServer {
+  HostServer({
+    required this.db,
+    required this.hostName,
+    required this.audioDir,
+    this.port = kHostPort,
+  }) {
+    db.broadcast = broadcast;
+  }
+
+  final HostDatabase db;
+  final String hostName;
+  final Directory audioDir;
+  final int port;
+
+  /// Пользователь, вошедший на самом хосте (администратор хоста) —
+  /// конечный адресат эскалации. Устанавливает приложение хоста.
+  String hostUserId = '';
+
+  HttpServer? _server;
+  final Map<WebSocketChannel, ClientSession> _sessions = {};
+
+  /// Очередь уведомлений для оффлайн-пользователей (доставляются при входе).
+  final Map<String, List<Map<String, dynamic>>> _pendingNotify = {};
+
+  bool get running => _server != null;
+
+  /// Фактический порт (после start; при port=0 — выданный ОС).
+  int get boundPort => _server?.port ?? port;
+
+  Future<void> start() async {
+    await audioDir.create(recursive: true);
+    final Router router = Router()
+      ..get('/api/ping', _handlePing)
+      ..get('/ws', webSocketHandler(_onWebSocket))
+      ..get('/audio/<name>', _handleGetAudio)
+      ..post('/audio/<name>', _handlePostAudio);
+
+    final Handler handler =
+        const Pipeline().addMiddleware(_cors()).addHandler(router.call);
+    _server = await shelf_io.serve(handler, InternetAddress.anyIPv4.address, port);
+  }
+
+  Future<void> stop() async {
+    for (final WebSocketChannel ch in _sessions.keys.toList()) {
+      await ch.sink.close();
+    }
+    _sessions.clear();
+    await _server?.close(force: true);
+    _server = null;
+  }
+
+  Middleware _cors() => (Handler inner) => (Request req) async {
+        final Response res = await inner(req);
+        return res.change(headers: {'Access-Control-Allow-Origin': '*'});
+      };
+
+  Response _handlePing(Request req) => Response.ok(
+        jsonEncode({'ok': true, 'name': hostName, 'protocol': kProtocolVersion}),
+        headers: {'content-type': 'application/json'},
+      );
+
+  // ---------- Аудио ----------
+
+  Future<Response> _handleGetAudio(Request req, String name) async {
+    final String safe = _safeName(name);
+    final File f = File('${audioDir.path}${Platform.pathSeparator}$safe');
+    if (!await f.exists()) return Response.notFound('not found');
+    return Response.ok(f.openRead(),
+        headers: {'content-type': 'audio/mp4', 'content-length': '${await f.length()}'});
+  }
+
+  Future<Response> _handlePostAudio(Request req, String name) async {
+    final String safe = _safeName(name);
+    final File f = File('${audioDir.path}${Platform.pathSeparator}$safe');
+    final IOSink sink = f.openWrite();
+    await for (final List<int> chunk in req.read()) {
+      sink.add(chunk);
+    }
+    await sink.flush();
+    await sink.close();
+    return Response.ok(jsonEncode({'ok': true, 'fileName': safe, 'size': await f.length()}),
+        headers: {'content-type': 'application/json'});
+  }
+
+  String _safeName(String name) =>
+      name.replaceAll(RegExp(r'[^A-Za-z0-9_.\-]'), '_');
+
+  // ---------- WebSocket ----------
+
+  void _onWebSocket(WebSocketChannel channel, String? protocol) {
+    final ClientSession session = ClientSession(channel: channel);
+    _sessions[channel] = session;
+    channel.stream.listen(
+      (dynamic data) => _onMessage(session, data),
+      onDone: () => _onDisconnect(session),
+      onError: (_) => _onDisconnect(session),
+    );
+  }
+
+  void _onDisconnect(ClientSession session) {
+    _sessions.remove(session.channel);
+    if (session.userId.isNotEmpty) {
+      _refreshPresence(session.userId);
+    }
+  }
+
+  void _send(ClientSession session, Map<String, dynamic> msg) {
+    try {
+      session.channel.sink.add(jsonEncode(msg));
+    } catch (_) {}
+  }
+
+  /// Рассылка всем подключённым (или только устройствам пользователя [onlyUserId]).
+  void broadcast(Map<String, dynamic> msg, {String? onlyUserId}) {
+    final String text = jsonEncode(msg);
+    for (final ClientSession s in _sessions.values) {
+      if (onlyUserId != null && s.userId != onlyUserId) continue;
+      try {
+        s.channel.sink.add(text);
+      } catch (_) {}
+    }
+  }
+
+  /// Уведомление конкретному пользователю; если оффлайн — в очередь.
+  void notifyUser(String userId, Map<String, dynamic> msg) {
+    final bool online = _sessions.values.any((s) => s.userId == userId);
+    if (online) {
+      broadcast(msg, onlyUserId: userId);
+    } else {
+      final List<Map<String, dynamic>> q = _pendingNotify.putIfAbsent(userId, () => []);
+      q.add(msg);
+      if (q.length > 50) q.removeAt(0);
+    }
+  }
+
+  /// Обновить онлайн-статус пользователя и разослать его.
+  void _refreshPresence(String userId) {
+    final bool online = _sessions.values.any((s) => s.userId == userId);
+    final user = db.users[userId];
+    if (user == null) return;
+    if (user.online != online) {
+      user.online = online;
+      if (!online) user.lastSeen = DateTime.now().toUtc();
+      db.saveUsers();
+    }
+    broadcast({
+      'type': MsgType.presence,
+      'userId': userId,
+      'online': online,
+      'lastSeen': user.lastSeen?.toIso8601String(),
+    });
+  }
+
+  /// Вызывается планировщиком: переводит в оффлайн «зависших» пользователей.
+  void presenceWatchdog() {
+    final DateTime now = DateTime.now().toUtc();
+    final Set<String> onlineUsers = _sessions.values.map((s) => s.userId).toSet();
+    for (final user in db.users.values) {
+      if (onlineUsers.contains(user.id)) continue;
+      if (user.online &&
+          (user.lastSeen == null || now.difference(user.lastSeen!) > kPresenceTimeout)) {
+        user.online = false;
+        user.lastSeen ??= now;
+        db.saveUsers();
+        broadcast({
+          'type': MsgType.presence,
+          'userId': user.id,
+          'online': false,
+          'lastSeen': user.lastSeen?.toIso8601String(),
+        });
+      }
+    }
+    // Пинги: закрыть сессии без признаков жизни.
+    for (final ClientSession s in _sessions.values) {
+      if (now.difference(s.lastPing) > kPresenceTimeout * 3) {
+        try {
+          s.channel.sink.close();
+        } catch (_) {}
+      }
+    }
+  }
+
+  void _onMessage(ClientSession session, dynamic data) {
+    Map<String, dynamic> msg;
+    try {
+      msg = (jsonDecode(data as String) as Map).cast<String, dynamic>();
+    } catch (_) {
+      return;
+    }
+    final String type = msg['type'] as String? ?? '';
+    switch (type) {
+      case MsgType.hello:
+        _onHello(session, msg);
+        break;
+      case MsgType.ping:
+        session.lastPing = DateTime.now().toUtc();
+        final user = db.users[session.userId];
+        if (user != null) {
+          user.lastSeen = session.lastPing;
+          db.saveUsers();
+        }
+        _send(session, {'type': MsgType.pong, 'serverTime': session.lastPing.toIso8601String()});
+        break;
+      case MsgType.noteCreate:
+        if (!sessionReady(session)) return;
+        final Note note = Note.fromJson((msg['note'] as Map).cast<String, dynamic>());
+        final HostOpResult r =
+            db.createNote(note, userId: session.userId, deviceId: session.deviceId);
+        _broadcastNoteResult(r);
+        break;
+      case MsgType.notePatch:
+        if (!sessionReady(session)) return;
+        final HostOpResult r = db.patchNote(
+          msg['noteId'] as String,
+          (msg['patch'] as Map).cast<String, dynamic>(),
+          baseVersion: (msg['baseVersion'] as num?)?.toInt() ?? 0,
+          userId: session.userId,
+          deviceId: session.deviceId,
+        );
+        _broadcastNoteResult(r);
+        break;
+      case MsgType.pinSet:
+        if (!sessionReady(session)) return;
+        final String noteId = msg['noteId'] as String;
+        final bool pinned = msg['pinned'] as bool? ?? false;
+        final HostOpResult r =
+            db.setPin(session.userId, noteId, pinned, deviceId: session.deviceId);
+        if (pinned) {
+          final Pin? p = db.pins['${session.userId}:$noteId'];
+          if (p != null) {
+            broadcast({'type': MsgType.pinUpsert, 'pin': p.toJson(), 'audit': _auditJson(r.audit)});
+          }
+        } else {
+          broadcast({
+            'type': MsgType.pinRemove,
+            'userId': session.userId,
+            'noteId': noteId,
+            'audit': _auditJson(r.audit),
+          });
+        }
+        break;
+      case MsgType.pinsOrder:
+        if (!sessionReady(session)) return;
+        final List<String> ids =
+            (msg['noteIds'] as List? ?? []).map((e) => e.toString()).toList();
+        db.reorderPins(session.userId, ids);
+        broadcast({'type': MsgType.pinsOrder, 'userId': session.userId, 'noteIds': ids});
+        break;
+      case MsgType.contactUpsert:
+        if (!sessionReady(session)) return;
+        final Contact c = Contact.fromJson((msg['contact'] as Map).cast<String, dynamic>());
+        final HostOpResult r =
+            db.upsertContact(c, userId: session.userId, deviceId: session.deviceId);
+        broadcast({
+          'type': MsgType.contactUpsert,
+          'contact': c.toJson(),
+          'audit': _auditJson(r.audit),
+        });
+        break;
+      case MsgType.contactDelete:
+        if (!sessionReady(session)) return;
+        final HostOpResult r = db.deleteContact(msg['contactId'] as String,
+            userId: session.userId, deviceId: session.deviceId);
+        broadcast({
+          'type': MsgType.contactDeleted,
+          'contactId': msg['contactId'],
+          'audit': _auditJson(r.audit),
+        });
+        break;
+      case MsgType.requestSnapshot:
+        _sendSnapshot(session);
+        break;
+    }
+  }
+
+  bool sessionReady(ClientSession s) => s.userId.isNotEmpty;
+
+  void _onHello(ClientSession session, Map<String, dynamic> msg) {
+    session.userId = msg['userId'] as String? ?? '';
+    session.userName = msg['userName'] as String? ?? 'Без имени';
+    session.deviceId = msg['deviceId'] as String? ?? '';
+    session.deviceName = msg['deviceName'] as String? ?? '';
+    if (session.userId.isEmpty) return;
+
+    db.helloUser(
+        userId: session.userId, userName: session.userName, deviceId: session.deviceId);
+    final user = db.users[session.userId]!;
+    user.online = true;
+    user.lastSeen = DateTime.now().toUtc();
+    db.saveUsers();
+
+    _send(session, {
+      'type': MsgType.welcome,
+      'hostName': hostName,
+      'hostUserId': hostUserId,
+      'serverTime': DateTime.now().toUtc().toIso8601String(),
+      'protocol': kProtocolVersion,
+    });
+    _sendSnapshot(session);
+
+    // Доставить отложенные уведомления.
+    final List<Map<String, dynamic>> pending = _pendingNotify.remove(session.userId) ?? [];
+    for (final Map<String, dynamic> m in pending) {
+      _send(session, m);
+    }
+    _refreshPresence(session.userId);
+  }
+
+  void _sendSnapshot(ClientSession session) {
+    final Map<String, dynamic> snap = db.snapshot();
+    snap['type'] = MsgType.snapshot;
+    _send(session, snap);
+  }
+
+  List<dynamic> _auditJson(List<AuditEntry> entries) => entries.map((e) => e.toJson()).toList();
+
+  void _broadcastNoteResult(HostOpResult r) {
+    if (r.note == null) return;
+    broadcast({
+      'type': MsgType.noteUpsert,
+      'note': r.note!.toJson(),
+      'audit': _auditJson(r.audit),
+    });
+  }
+
+  // ---------- Локальные операции (пользователь самого хоста) ----------
+
+  /// Создание заявки на самом хосте — те же правила, что и у клиентов.
+  void localCreateNote(Note note, {required String userId}) {
+    final HostOpResult r = db.createNote(note, userId: userId, deviceId: 'host');
+    _broadcastNoteResult(r);
+  }
+
+  /// Изменение полей заявки на самом хосте.
+  void localPatchNote(String noteId, Map<String, dynamic> patch,
+      {required int baseVersion, required String userId}) {
+    final HostOpResult r = db.patchNote(noteId, patch,
+        baseVersion: baseVersion, userId: userId, deviceId: 'host');
+    _broadcastNoteResult(r);
+  }
+
+  /// Закрепление/открепление пользователем хоста.
+  void localSetPin(String userId, String noteId, bool pinned) {
+    final HostOpResult r = db.setPin(userId, noteId, pinned, deviceId: 'host');
+    if (pinned) {
+      final Pin? p = db.pins['$userId:$noteId'];
+      if (p != null) {
+        broadcast({'type': MsgType.pinUpsert, 'pin': p.toJson(), 'audit': _auditJson(r.audit)});
+      }
+    } else {
+      broadcast({
+        'type': MsgType.pinRemove,
+        'userId': userId,
+        'noteId': noteId,
+        'audit': _auditJson(r.audit),
+      });
+    }
+  }
+
+  /// Ручной порядок закреплённых пользователем хоста.
+  void localReorderPins(String userId, List<String> orderedNoteIds) {
+    db.reorderPins(userId, orderedNoteIds);
+    broadcast({'type': MsgType.pinsOrder, 'userId': userId, 'noteIds': orderedNoteIds});
+  }
+
+  void localUpsertContact(Contact contact, {required String userId}) {
+    final HostOpResult r = db.upsertContact(contact, userId: userId, deviceId: 'host');
+    broadcast({
+      'type': MsgType.contactUpsert,
+      'contact': contact.toJson(),
+      'audit': _auditJson(r.audit),
+    });
+  }
+
+  void localDeleteContact(String contactId, {required String userId}) {
+    final HostOpResult r = db.deleteContact(contactId, userId: userId, deviceId: 'host');
+    broadcast({
+      'type': MsgType.contactDeleted,
+      'contactId': contactId,
+      'audit': _auditJson(r.audit),
+    });
+  }
+
+  /// Трансляция хостовых настроек всем клиентам после изменения на хосте.
+  void broadcastHostSettings() {
+    broadcast({'type': MsgType.hostSettings, 'settings': db.settings.toJson()});
+  }
+
+  /// Полная пересылка снапшота всем подключённым (после восстановления из копии).
+  void broadcastSnapshotToAll() {
+    for (final ClientSession s in _sessions.values) {
+      _sendSnapshot(s);
+    }
+  }
+}

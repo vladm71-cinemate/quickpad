@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Быстрый блокнот заявок</string>
+    <string name="widget_quick_add">Быстрая заметка</string>
+    <string name="widget_desc">Создание заявки в одно нажатие</string>
+</resources>

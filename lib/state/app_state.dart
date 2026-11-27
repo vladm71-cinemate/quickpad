@@ -1,0 +1,635 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../core/constants.dart';
+import '../core/ids.dart';
+import '../data/backup_service.dart';
+import '../data/host_database.dart';
+import '../data/local_cache.dart';
+import '../models/audit_entry.dart';
+import '../models/contact.dart';
+import '../models/enums.dart';
+import '../models/note.dart';
+import '../models/note_ops.dart';
+import '../models/pin.dart';
+import '../models/settings.dart';
+import '../models/user.dart';
+import '../net/client_connection.dart';
+import '../net/discovery.dart';
+import '../net/host_jobs.dart';
+import '../net/host_server.dart';
+import '../net/protocol.dart';
+import '../services/audio_service.dart';
+import '../services/device_info.dart';
+import '../services/notification_service.dart';
+import '../services/stt_service.dart';
+import 'settings_controller.dart';
+
+/// Сводка дня (ТЗ 4.4): Новых / В работе / Выполнено сегодня / Просрочено.
+class DaySummary {
+  const DaySummary({
+    required this.fresh,
+    required this.inProgress,
+    required this.doneToday,
+    required this.overdue,
+  });
+
+  final int fresh;
+  final int inProgress;
+  final int doneToday;
+  final int overdue;
+
+  static DaySummary compute(Iterable<Note> notes) {
+    final DateTime now = DateTime.now();
+    final DateTime todayUtc = DateTime.utc(now.year, now.month, now.day);
+    int fresh = 0, inProgress = 0, doneToday = 0, overdue = 0;
+    for (final Note n in notes) {
+      if (n.status == NoteStatus.fresh) fresh++;
+      if (n.status == NoteStatus.inProgress) inProgress++;
+      if (n.status == NoteStatus.done && n.updatedAt.isAfter(todayUtc)) doneToday++;
+      if (n.isOverdue()) overdue++;
+    }
+    return DaySummary(fresh: fresh, inProgress: inProgress, doneToday: doneToday, overdue: overdue);
+  }
+}
+
+/// Глобальное состояние приложения: режим (хост/клиент), данные, операции.
+///
+/// Хост (Windows): HostDatabase + HostServer + HostJobs + BackupService + HostAnnouncer.
+/// Клиент (Android/Windows): ClientConnection + LocalCache (оффлайн-режим, ТЗ 4.5).
+class AppState extends ChangeNotifier {
+  AppState({required this.prefs, required this.settingsCtl});
+
+  final SharedPreferences prefs;
+  final SettingsController settingsCtl;
+
+  final NotificationService notifications = NotificationService();
+  final SttService stt = SttService();
+  final AudioService audio = AudioService();
+
+  late final Directory baseDir;
+  late final DeviceIdentity device;
+
+  HostDatabase? _db;
+  HostServer? _server;
+  HostJobs? _jobs;
+  HostAnnouncer? _announcer;
+  BackupService? _backup;
+
+  ClientConnection? _client;
+  LocalCache? _cache;
+
+  bool ready = false;
+  DeviceRole role = DeviceRole.client;
+  AppUser? currentUser;
+  String lastError = '';
+
+  static const String _kRole = 'app.role';
+  static const String _kUserId = 'app.userId';
+  static const String _kUserName = 'app.userName';
+  static const String _kHostAddr = 'app.hostAddress';
+  static const String _kHostPort = 'app.hostPort';
+  static const String _kConfigured = 'app.configured';
+
+  // ---------- Общие геттеры ----------
+
+  LocalSettings get ls => settingsCtl.settings;
+  bool get configured => prefs.getBool(_kConfigured) ?? false;
+  bool get isHost => role == DeviceRole.host;
+  bool get serverRunning => _server?.running ?? false;
+
+  HostSettings get hs =>
+      isHost ? (_db?.settings ?? HostSettings()) : (_cache?.hostSettings ?? HostSettings());
+
+  List<Note> get notes => isHost
+      ? (_db?.notes.values.toList() ?? [])
+      : (_cache?.notes.values.toList() ?? []);
+  List<AppUser> get users => isHost
+      ? (_db?.users.values.toList() ?? [])
+      : (_cache?.users.values.toList() ?? []);
+  List<Contact> get contacts => isHost
+      ? (_db?.contacts.values.toList() ?? [])
+      : (_cache?.contacts.values.toList() ?? []);
+  List<Pin> get pins => isHost
+      ? (_db?.pins.values.toList() ?? [])
+      : (_cache?.pins.values.toList() ?? []);
+  List<AuditEntry> get audit =>
+      isHost ? (_db?.audit ?? const []) : (_cache?.audit ?? const []);
+
+  ConnState get connState => isHost
+      ? (serverRunning ? ConnState.online : ConnState.offline)
+      : (_client?.state ?? ConnState.offline);
+
+  int get queuedCount => _cache?.outbox.length ?? 0;
+  String get hostAddress => prefs.getString(_kHostAddr) ?? '';
+  int get hostPort => prefs.getInt(_kHostPort) ?? kHostPort;
+
+  String get connectionLabel {
+    if (isHost) return serverRunning ? 'Хост запущен (порт $kHostPort)' : 'Хост остановлен';
+    switch (connState) {
+      case ConnState.online:
+        return 'Подключено к хосту';
+      case ConnState.syncing:
+        return 'Синхронизация…';
+      case ConnState.offline:
+        return queuedCount > 0 ? 'Оффлайн (в очереди: $queuedCount)' : 'Нет связи (оффлайн)';
+    }
+  }
+
+  // ---------- Инициализация ----------
+
+  Future<void> init() async {
+    final Directory support = await getApplicationSupportDirectory();
+    baseDir = Directory('${support.path}${Platform.pathSeparator}quickpad');
+    await baseDir.create(recursive: true);
+
+    device = await loadDeviceIdentity(prefs);
+    role = prefs.getString(_kRole) == 'host' ? DeviceRole.host : DeviceRole.client;
+
+    await notifications.init();
+    if (ls.sttEnabled) await stt.init();
+
+    if (isHost) {
+      await _startHostStack();
+    } else if (configured) {
+      await _startClientStack();
+    }
+
+    ready = true;
+    notifyListeners();
+  }
+
+  Future<void> _startHostStack() async {
+    final Directory hostDir = Directory('${baseDir.path}${Platform.pathSeparator}host');
+    final Directory audioDir = Directory('${hostDir.path}${Platform.pathSeparator}audio');
+    final Directory backupDir = Directory('${hostDir.path}${Platform.pathSeparator}backups');
+
+    _db = HostDatabase(dataDir: hostDir, audioDir: audioDir);
+    await _db!.load();
+
+    final String? uid = prefs.getString(_kUserId);
+    final String uname = prefs.getString(_kUserName) ?? 'Хост';
+    if (uid != null) {
+      currentUser =
+          _db!.helloUser(userId: uid, userName: uname, deviceId: device.deviceId);
+      currentUser!.online = true;
+      currentUser!.lastSeen = DateTime.now().toUtc();
+      _db!.saveUsers();
+    }
+
+    _server = HostServer(db: _db!, hostName: device.deviceName, audioDir: audioDir);
+    if (uid != null) _server!.hostUserId = uid;
+
+    // Цепочка на рассылку: локальные уведомления на хосте + обновление UI.
+    final void Function(Map<String, dynamic>, {String? onlyUserId}) orig = _server!.broadcast;
+    _db!.broadcast = (Map<String, dynamic> msg, {String? onlyUserId}) {
+      orig(msg, onlyUserId: onlyUserId);
+      _onHostBroadcast(msg, onlyUserId);
+    };
+
+    _backup = BackupService(db: _db!, backupDir: backupDir);
+    _db!.onDataChanged = () {
+      _backup!.scheduleAutoBackup();
+      notifyListeners();
+    };
+
+    await _server!.start();
+    _jobs = HostJobs(db: _db!, server: _server!)..start();
+    _announcer = HostAnnouncer(hostName: device.deviceName);
+    unawaited(_announcer!.start());
+  }
+
+  void _onHostBroadcast(Map<String, dynamic> msg, String? onlyUserId) {
+    if (msg['type'] == MsgType.notify) {
+      final String? hostUid = _server?.hostUserId;
+      if (onlyUserId == null || onlyUserId == hostUid) {
+        unawaited(notifications.showFromHost(msg, ls));
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> _startClientStack() async {
+    final String? addr = prefs.getString(_kHostAddr);
+    final String? uid = prefs.getString(_kUserId);
+    if (addr == null || addr.isEmpty || uid == null) return;
+
+    _cache ??= LocalCache(dataDir: Directory('${baseDir.path}${Platform.pathSeparator}client'));
+    await _cache!.load();
+
+    final String uname = prefs.getString(_kUserName) ?? '';
+    currentUser = _cache!.users[uid] ??
+        AppUser(id: uid, name: uname.isEmpty ? 'Без имени' : uname, deviceIds: [device.deviceId]);
+
+    await _client?.stop();
+    _client = ClientConnection(cache: _cache!);
+    _client!.onDataChanged = notifyListeners;
+    _client!.onNotify = (Map<String, dynamic> msg) {
+      unawaited(notifications.showFromHost(msg, ls));
+    };
+    await _client!.start(
+      host: addr,
+      port: prefs.getInt(_kHostPort) ?? kHostPort,
+      userId: uid,
+      userName: currentUser!.name,
+      deviceId: device.deviceId,
+      deviceName: device.deviceName,
+      platform: device.platform,
+    );
+  }
+
+  // ---------- Онбординг ----------
+
+  Future<void> chooseRole(DeviceRole r) async {
+    role = r;
+    await prefs.setString(_kRole, r == DeviceRole.host ? 'host' : 'client');
+    notifyListeners();
+  }
+
+  /// Создать/войти в профиль пользователя на этом устройстве (ТЗ 3, 6.10).
+  Future<AppUser> signIn(String name) async {
+    final String id = prefs.getString(_kUserId) ?? newId();
+    await prefs.setString(_kUserId, id);
+    await prefs.setString(_kUserName, name.trim());
+    if (isHost && _db != null) {
+      currentUser =
+          _db!.helloUser(userId: id, userName: name.trim(), deviceId: device.deviceId);
+      currentUser!.online = true;
+      currentUser!.lastSeen = DateTime.now().toUtc();
+      _db!.saveUsers();
+      _server?.hostUserId = id;
+    } else {
+      currentUser =
+          AppUser(id: id, name: name.trim(), deviceIds: [device.deviceId]);
+    }
+    notifyListeners();
+    return currentUser!;
+  }
+
+  /// Смена пользователя на устройстве (если разрешено настройкой).
+  Future<void> switchUser(AppUser user) async {
+    await prefs.setString(_kUserId, user.id);
+    await prefs.setString(_kUserName, user.name);
+    currentUser = user;
+    if (isHost && _db != null) {
+      _db!.helloUser(userId: user.id, userName: user.name, deviceId: device.deviceId);
+      _server?.hostUserId = user.id;
+      user.online = true;
+      _db!.saveUsers();
+    } else {
+      await _startClientStack(); // переподключение под новым профилем
+    }
+    notifyListeners();
+  }
+
+  Future<void> renameUser(String newName) async {
+    final AppUser? u = currentUser;
+    if (u == null || newName.trim().isEmpty) return;
+    u.name = newName.trim();
+    await prefs.setString(_kUserName, u.name);
+    if (isHost && _db != null) {
+      _db!.helloUser(userId: u.id, userName: u.name, deviceId: device.deviceId);
+    } else {
+      _cache?.saveUsers();
+      await _startClientStack();
+    }
+    notifyListeners();
+  }
+
+  /// Подключение клиента к хосту (ручной ввод или автопоиск).
+  Future<void> connectToHost(String address, [int port = kHostPort]) async {
+    await prefs.setString(_kHostAddr, address.trim());
+    await prefs.setInt(_kHostPort, port);
+    await _startClientStack();
+    notifyListeners();
+  }
+
+  Future<List<DiscoveredHost>> findHosts() => discoverHosts();
+
+  Future<void> finishOnboarding() async {
+    await prefs.setBool(_kConfigured, true);
+    notifyListeners();
+  }
+
+  /// Полный сброс настройки «роль+подключение» (повторный онбординг).
+  Future<void> resetConfiguration() async {
+    await _client?.stop();
+    _client = null;
+    await prefs.setBool(_kConfigured, false);
+    notifyListeners();
+  }
+
+  // ---------- Заявки ----------
+
+  Note? noteById(String id) {
+    final Map<String, Note>? m = isHost ? _db?.notes : _cache?.notes;
+    return m?[id];
+  }
+
+  AppUser? userById(String id) {
+    final Map<String, AppUser>? m = isHost ? _db?.users : _cache?.users;
+    return m?[id];
+  }
+
+  String userName(String id) => userById(id)?.name ?? (id.isEmpty ? '—' : id);
+
+  Future<Note> createNote({
+    required String text,
+    String? assigneeId,
+    NotePriority? priority,
+    DateTime? deadline,
+    Reminder? reminder,
+    List<String> tags = const [],
+    int? colorValue,
+    String? contactId,
+    AudioAttachment? audioAttachment,
+  }) async {
+    final AppUser me = currentUser!;
+    final Note note = Note(
+      id: newId(),
+      text: text.trim(),
+      authorId: me.id,
+      createdAt: DateTime.now().toUtc(),
+      assigneeId: assigneeId,
+      priority: priority,
+      deadline: deadline,
+      reminder: reminder,
+      tags: List<String>.from(tags),
+      colorValue: colorValue,
+      contactId: contactId,
+      audio: audioAttachment,
+    );
+    if (isHost) {
+      _server?.localCreateNote(note, userId: me.id);
+    } else {
+      _client?.sendOp(ClientMsg.noteCreate(note));
+      _cache?.applyNoteUpsert(note); // оптимистично, хост пришлёт авторитетную версию
+    }
+    notifyListeners();
+    return note;
+  }
+
+  /// Патч различий между версией «до» и «после» — основа журнала «старое → новое».
+  Map<String, dynamic> diffToPatch(Note before, Note after) {
+    final Map<String, dynamic> p = <String, dynamic>{};
+    if (before.text != after.text) p[NoteFields.text] = after.text;
+    if (before.status != after.status) p[NoteFields.status] = after.status.wire;
+    if (before.assigneeId != after.assigneeId) p[NoteFields.assignee] = after.assigneeId;
+    if (before.priority != after.priority) p[NoteFields.priority] = after.priority?.wire;
+    if (before.deadline != after.deadline) {
+      p[NoteFields.deadline] = after.deadline?.toIso8601String();
+    }
+    if (jsonEncode(before.reminder?.toJson()) != jsonEncode(after.reminder?.toJson())) {
+      p[NoteFields.reminder] = after.reminder?.toJson();
+    }
+    if (!listEquals(before.tags, after.tags)) p[NoteFields.tags] = after.tags;
+    if (before.colorValue != after.colorValue) p[NoteFields.color] = after.colorValue;
+    if (before.contactId != after.contactId) p[NoteFields.contact] = after.contactId;
+    if (jsonEncode(before.audio?.toJson()) != jsonEncode(after.audio?.toJson())) {
+      p[NoteFields.audio] = after.audio?.toJson();
+    }
+    return p;
+  }
+
+  Future<void> updateNote(Note before, Note after) async {
+    final Map<String, dynamic> patch = diffToPatch(before, after);
+    if (patch.isEmpty) return;
+    final String uid = currentUser?.id ?? '';
+    if (isHost) {
+      _server?.localPatchNote(before.id, patch, baseVersion: before.version, userId: uid);
+    } else {
+      _client?.sendOp(ClientMsg.notePatch(before.id, patch, before.version));
+      final Note? local = _cache?.notes[before.id];
+      if (local != null) {
+        applyPatchToNote(local, patch); // оптимистично
+        local.updatedAt = DateTime.now().toUtc();
+        _cache?.saveNotes();
+      }
+    }
+    notifyListeners();
+  }
+
+  Future<void> setStatus(Note note, NoteStatus status) async {
+    final Note after = note.copy()..status = status;
+    await updateNote(note, after);
+  }
+
+  // ---------- Закрепления (персональные) ----------
+
+  bool isPinned(String noteId) {
+    final String? uid = currentUser?.id;
+    if (uid == null) return false;
+    return pins.any((p) => p.userId == uid && p.noteId == noteId);
+  }
+
+  List<Pin> get myPins {
+    final String? uid = currentUser?.id;
+    if (uid == null) return [];
+    final List<Pin> list = pins.where((p) => p.userId == uid).toList()
+      ..sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+    return list;
+  }
+
+  /// Переключить закрепление. Возвращает предупреждение о мягком лимите или null.
+  Future<String?> togglePin(Note note) async {
+    final AppUser? me = currentUser;
+    if (me == null) return null;
+    final bool pinned = !isPinned(note.id);
+    if (isHost) {
+      _server?.localSetPin(me.id, note.id, pinned);
+    } else {
+      _client?.sendOp(ClientMsg.pinSet(note.id, pinned));
+      if (pinned) {
+        _cache?.applyPin(Pin(
+            userId: me.id,
+            noteId: note.id,
+            pinnedAt: DateTime.now().toUtc(),
+            orderIndex: myPins.length));
+      } else {
+        _cache?.removePin(me.id, note.id);
+      }
+    }
+    notifyListeners();
+    // Мягкий лимит 20: только предупреждение, не блокируем (ТЗ 12).
+    if (pinned && myPins.length > kPinSoftLimit) {
+      return 'Закреплено больше $kPinSoftLimit заявок — список может быть неудобным';
+    }
+    return null;
+  }
+
+  /// Ручной порядок закреплённых; синхронизируется между устройствами пользователя.
+  Future<void> reorderMyPins(List<String> orderedNoteIds) async {
+    final AppUser? me = currentUser;
+    if (me == null) return;
+    if (isHost) {
+      _server?.localReorderPins(me.id, orderedNoteIds);
+    } else {
+      _client?.sendOp(ClientMsg.pinsOrder(orderedNoteIds));
+      for (int i = 0; i < orderedNoteIds.length; i++) {
+        final Pin? p = _cache?.pins['${me.id}:${orderedNoteIds[i]}'];
+        if (p != null) p.orderIndex = i;
+      }
+      _cache?.savePins();
+    }
+    notifyListeners();
+  }
+
+  // ---------- Контакты ----------
+
+  Future<Contact> saveContact(Contact contact) async {
+    if (isHost) {
+      _server?.localUpsertContact(contact, userId: currentUser?.id ?? '');
+    } else {
+      _client?.sendOp(ClientMsg.contactUpsert(contact.toJson()));
+      _cache?.applyContact(contact);
+    }
+    notifyListeners();
+    return contact;
+  }
+
+  Future<void> deleteContact(Contact contact) async {
+    if (isHost) {
+      _server?.localDeleteContact(contact.id, userId: currentUser?.id ?? '');
+    } else {
+      _client?.sendOp(ClientMsg.contactDelete(contact.id));
+      _cache?.removeContact(contact.id);
+    }
+    notifyListeners();
+  }
+
+  // ---------- Пользователи (хост) ----------
+
+  Future<void> deleteUser(AppUser user) async {
+    if (!isHost || _db == null) return;
+    _db!.deleteUser(user.id, actorId: currentUser?.id ?? 'host');
+    notifyListeners();
+  }
+
+  // ---------- Хостовые настройки (только на хосте, ТЗ 6) ----------
+
+  Future<void> saveHostSettings(HostSettings s) async {
+    if (!isHost || _db == null) return;
+    _db!.settings = s;
+    _db!.saveSettings();
+    _server?.broadcastHostSettings();
+    notifyListeners();
+  }
+
+  // ---------- Резервное копирование (хост, ТЗ 4.6) ----------
+
+  Future<File?> backupNow() => _backup?.autoBackup() ?? Future<File?>.value(null);
+
+  Future<File?> exportBackup(String path) => _backup?.exportTo(path) ?? Future<File?>.value(null);
+
+  /// null = успех, иначе текст ошибки.
+  Future<String?> importBackup(String path) async {
+    final String? err = await _backup?.importFrom(path);
+    if (err == null) {
+      _server?.broadcastSnapshotToAll();
+    }
+    notifyListeners();
+    return err;
+  }
+
+  // ---------- Аудио ----------
+
+  /// Прикрепить записанный файл к хосту (копирование на хосте / HTTP-загрузка с клиента).
+  Future<AudioAttachment?> attachAudio(RecordedAudio rec) async {
+    if (isHost && _server != null) {
+      try {
+        final File dest = File(
+            '${_server!.audioDir.path}${Platform.pathSeparator}${rec.fileName}');
+        await File(rec.path).copy(dest.path);
+        final int size = await dest.length();
+        return AudioAttachment(
+            fileName: rec.fileName, sizeBytes: size, durationSec: rec.durationSec);
+      } catch (_) {
+        return null;
+      }
+    }
+    final int? size = await audio.upload(hostAddress, hostPort, rec);
+    if (size == null) return null;
+    return AudioAttachment(
+        fileName: rec.fileName, sizeBytes: size, durationSec: rec.durationSec);
+  }
+
+  /// URL/путь для воспроизведения вложения.
+  String audioLocation(String fileName) {
+    if (isHost && _server != null) {
+      return '${_server!.audioDir.path}${Platform.pathSeparator}$fileName';
+    }
+    return 'http://$hostAddress:$hostPort/audio/$fileName';
+  }
+
+  // ---------- Выборки для UI ----------
+
+  /// Список заявок: фильтры + сортировка (закреплённые мной — сверху, если включено).
+  List<Note> listNotes({bool mineOnly = false, String query = '', NoteStatus? status}) {
+    final String? uid = currentUser?.id;
+    Iterable<Note> list = notes;
+    if (mineOnly && uid != null) {
+      list = list.where((n) => n.authorId == uid || n.assigneeId == uid);
+    }
+    if (status != null) list = list.where((n) => n.status == status);
+    final String q = query.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      list = list.where((n) =>
+          n.text.toLowerCase().contains(q) ||
+          userName(n.authorId).toLowerCase().contains(q) ||
+          n.tags.any((t) => t.toLowerCase().contains(q)));
+    }
+    final List<Note> result = list.toList();
+    final Map<String, int> pinPos = {
+      for (final Pin p in (uid == null ? const <Pin>[] : myPins)) p.noteId: p.orderIndex
+    };
+    final bool pinnedTop = ls.showPinnedTop;
+    result.sort((a, b) {
+      if (pinnedTop) {
+        final int? pa = pinPos[a.id];
+        final int? pb = pinPos[b.id];
+        if (pa != null && pb != null) return pa.compareTo(pb);
+        if (pa != null) return -1;
+        if (pb != null) return 1;
+      }
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+    return result;
+  }
+
+  List<Note> get pinnedNotes {
+    final List<Note> result = [];
+    for (final Pin p in myPins) {
+      final Note? n = noteById(p.noteId);
+      if (n != null) result.add(n);
+    }
+    return result;
+  }
+
+  DaySummary get summary => DaySummary.compute(notes);
+
+  List<AuditEntry> auditForNote(String noteId) =>
+      audit.where((e) => e.noteId == noteId).toList().reversed.toList();
+
+  // ---------- Завершение ----------
+
+  Future<void> shutdown() async {
+    _jobs?.stop();
+    _announcer?.stop();
+    await _client?.stop();
+    await _server?.stop();
+    await _db?.flush();
+    await _cache?.flush();
+  }
+
+  @override
+  void dispose() {
+    unawaited(shutdown());
+    audio.dispose();
+    super.dispose();
+  }
+}

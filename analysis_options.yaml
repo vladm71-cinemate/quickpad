@@ -1,0 +1,20 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    strict-casts: true
+  errors:
+    # В UI-коде часто удобнее игнорировать, чем раздувать код
+    prefer_const_constructors: ignore
+    prefer_const_constructors_in_immutables: ignore
+    prefer_const_declarations: ignore
+    prefer_const_literals_to_create_immutables: ignore
+  exclude:
+    - build/**
+    - android/**
+    - windows/**
+
+linter:
+  rules:
+    prefer_final_locals: true
+    unawaited_futures: true
