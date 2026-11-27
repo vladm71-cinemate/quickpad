@@ -215,7 +215,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: TextField(
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Поиск по тексту, автору, тегам',
+                hintText: 'Поиск по всем данным: слово, телефон, автор, тег…',
                 border: OutlineInputBorder(),
                 isDense: true,
               ),

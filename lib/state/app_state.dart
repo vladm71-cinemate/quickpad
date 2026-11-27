@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants.dart';
 import '../core/ids.dart';
+import '../core/timefmt.dart';
 import '../data/backup_service.dart';
 import '../data/host_database.dart';
 import '../data/local_cache.dart';
@@ -143,7 +145,13 @@ class AppState extends ChangeNotifier {
 
   // ---------- Инициализация ----------
 
+  bool _baseReady = false;
+  bool _hostStarted = false;
+
+  /// Одноразовая инициализация. Повторные вызовы безопасны (идемпотентно).
   Future<void> init() async {
+    if (_baseReady) return;
+    _baseReady = true;
     final Directory support = await getApplicationSupportDirectory();
     baseDir = Directory('${support.path}${Platform.pathSeparator}quickpad');
     await baseDir.create(recursive: true);
@@ -152,12 +160,14 @@ class AppState extends ChangeNotifier {
     role = prefs.getString(_kRole) == 'host' ? DeviceRole.host : DeviceRole.client;
 
     await notifications.init();
-    if (ls.sttEnabled) await stt.init();
+    if (ls.sttEnabled) unawaited(stt.init());
 
     if (isHost) {
       await _startHostStack();
     } else if (configured) {
-      await _startClientStack();
+      // Сеть не должна блокировать запуск приложения: подключаемся в фоне,
+      // оффлайн-режим (ТЗ 4.5) позволяет работать до появления связи.
+      unawaited(_startClientStack());
     }
 
     ready = true;
@@ -165,6 +175,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _startHostStack() async {
+    if (_hostStarted) return; // стек уже запущен
     final Directory hostDir = Directory('${baseDir.path}${Platform.pathSeparator}host');
     final Directory audioDir = Directory('${hostDir.path}${Platform.pathSeparator}audio');
     final Directory backupDir = Directory('${hostDir.path}${Platform.pathSeparator}backups');
@@ -202,6 +213,7 @@ class AppState extends ChangeNotifier {
     _jobs = HostJobs(db: _db!, server: _server!)..start();
     _announcer = HostAnnouncer(hostName: device.deviceName);
     unawaited(_announcer!.start());
+    _hostStarted = true;
   }
 
   void _onHostBroadcast(Map<String, dynamic> msg, String? onlyUserId) {
@@ -232,7 +244,9 @@ class AppState extends ChangeNotifier {
     _client!.onNotify = (Map<String, dynamic> msg) {
       unawaited(notifications.showFromHost(msg, ls));
     };
-    await _client!.start(
+    // Подключение — в фоне: у хоста может быть долгий TCP-таймаут,
+    // UI блокировать нельзя. Клиент сам переподключается.
+    unawaited(_client!.start(
       host: addr,
       port: prefs.getInt(_kHostPort) ?? kHostPort,
       userId: uid,
@@ -240,7 +254,7 @@ class AppState extends ChangeNotifier {
       deviceId: device.deviceId,
       deviceName: device.deviceName,
       platform: device.platform,
-    );
+    ));
   }
 
   // ---------- Онбординг ----------
@@ -256,7 +270,8 @@ class AppState extends ChangeNotifier {
     final String id = prefs.getString(_kUserId) ?? newId();
     await prefs.setString(_kUserId, id);
     await prefs.setString(_kUserName, name.trim());
-    if (isHost && _db != null) {
+    if (isHost) {
+      await _startHostStack(); // идемпотентно: если уже запущен — сразу выйдет
       currentUser =
           _db!.helloUser(userId: id, userName: name.trim(), deviceId: device.deviceId);
       currentUser!.online = true;
@@ -302,11 +317,29 @@ class AppState extends ChangeNotifier {
   }
 
   /// Подключение клиента к хосту (ручной ввод или автопоиск).
+  /// Не блокирует: подключение и переподключение идут в фоне.
   Future<void> connectToHost(String address, [int port = kHostPort]) async {
     await prefs.setString(_kHostAddr, address.trim());
     await prefs.setInt(_kHostPort, port);
     await _startClientStack();
     notifyListeners();
+  }
+
+  /// Завершение онбординга: запуск стека под выбранную роль.
+  /// Возвращает null при успехе, иначе текст ошибки для показа пользователю.
+  Future<String?> activateAfterOnboarding() async {
+    try {
+      if (isHost) {
+        await _startHostStack().timeout(const Duration(seconds: 15));
+        if (!serverRunning) {
+          return 'Сервер хоста не запустился. Закройте другие копии приложения '
+              'и попробуйте снова.';
+        }
+      }
+      return null;
+    } catch (e) {
+      return 'Ошибка запуска: $e';
+    }
   }
 
   Future<List<DiscoveredHost>> findHosts() => discoverHosts();
@@ -568,7 +601,13 @@ class AppState extends ChangeNotifier {
 
   // ---------- Выборки для UI ----------
 
-  /// Список заявок: фильтры + сортировка (закреплённые мной — сверху, если включено).
+  /// Список заявок: фильтры + сортировка.
+  ///
+  /// Без запроса: закреплённые мной — сверху (если включено), далее по дате.
+  /// С запросом: глобальный поиск по всем данным (текст, автор, исполнитель,
+  /// статус, приоритет, теги, контакт, ТЕЛЕФОН, расшифровка аудио, дедлайн)
+  /// с сортировкой по позиции вхождения — как в 1С (чем раньше совпадение,
+  /// тем выше результат).
   List<Note> listNotes({bool mineOnly = false, String query = '', NoteStatus? status}) {
     final String? uid = currentUser?.id;
     Iterable<Note> list = notes;
@@ -576,13 +615,25 @@ class AppState extends ChangeNotifier {
       list = list.where((n) => n.authorId == uid || n.assigneeId == uid);
     }
     if (status != null) list = list.where((n) => n.status == status);
+
     final String q = query.trim().toLowerCase();
     if (q.isNotEmpty) {
-      list = list.where((n) =>
-          n.text.toLowerCase().contains(q) ||
-          userName(n.authorId).toLowerCase().contains(q) ||
-          n.tags.any((t) => t.toLowerCase().contains(q)));
+      final String qDigits = q.replaceAll(RegExp(r'\D'), '');
+      final List<MapEntry<Note, int>> scored = [];
+      for (final Note n in list) {
+        final String corpus = _searchCorpus(n);
+        int pos = corpus.indexOf(q);
+        // Телефонный поиск: цифры без пробелов/скобок («912345» найдёт «+7 912 345-…»).
+        if (pos < 0 && qDigits.length >= 3) pos = corpus.indexOf(qDigits);
+        if (pos >= 0) scored.add(MapEntry(n, pos));
+      }
+      scored.sort((a, b) {
+        if (a.value != b.value) return a.value.compareTo(b.value);
+        return b.key.updatedAt.compareTo(a.key.updatedAt);
+      });
+      return scored.map((e) => e.key).toList();
     }
+
     final List<Note> result = list.toList();
     final Map<String, int> pinPos = {
       for (final Pin p in (uid == null ? const <Pin>[] : myPins)) p.noteId: p.orderIndex
@@ -599,6 +650,39 @@ class AppState extends ChangeNotifier {
       return b.updatedAt.compareTo(a.updatedAt);
     });
     return result;
+  }
+
+  /// «Корпус» для поиска по заявке: все значимые поля одной строкой (lower-case).
+  /// Порядок полей важен: совпадение в тексте ценится выше совпадения в телефоне.
+  String _searchCorpus(Note n) {
+    final StringBuffer sb = StringBuffer();
+    void add(String? s) {
+      if (s != null && s.isNotEmpty) {
+        sb.write(s.toLowerCase());
+        sb.write('\n');
+      }
+    }
+
+    add(n.text);
+    add(userName(n.authorId));
+    add(n.assigneeId != null ? userName(n.assigneeId!) : null);
+    add(n.status.label);
+    add(n.priority?.label);
+    for (final String t in n.tags) {
+      add(t);
+    }
+    final Contact? c = n.contactId == null
+        ? null
+        : contacts.firstWhereOrNull((x) => x.id == n.contactId);
+    if (c != null) {
+      add(c.name);
+      add(c.phone);
+      add(c.phone.replaceAll(RegExp(r'\D'), '')); // телефон только цифрами
+      add(c.comment);
+    }
+    if (n.deadline != null) add(formatDateTime(n.deadline!));
+    add(n.audio?.transcript);
+    return sb.toString();
   }
 
   List<Note> get pinnedNotes {

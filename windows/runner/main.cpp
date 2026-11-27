@@ -27,7 +27,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"Быстрый блокнот заявок", origin, size)) {
+  // Заголовок окна — «Быстрый блокнот заявок». Unicode-escapes, чтобы не
+  // зависеть от кодировки исходного файла при компиляции MSVC.
+  if (!window.Create(L"\x0411\x044B\x0441\x0442\x0440\x044B\x0439 \x0431\x043B\x043E\x043A\x043D\x043E\x0442 \x0437\x0430\x044F\x0432\x043E\x043A", origin, size)) {
     return EXIT_FAILURE;
   }
   window.SetQuitOnClose(true);

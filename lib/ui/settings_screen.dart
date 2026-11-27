@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/settings.dart';
+import '../net/discovery.dart';
 import '../state/app_state.dart';
 import '../state/settings_controller.dart';
 
@@ -11,6 +14,79 @@ import '../state/settings_controller.dart';
 /// редактируются только на хосте, на клиентах — только просмотр.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  /// Ручной ввод адреса хоста (клиент).
+  Future<void> _editHostAddress(BuildContext context, AppState app) async {
+    final TextEditingController ctl = TextEditingController(text: app.hostAddress);
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Адрес хоста'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(hintText: '192.168.1.50'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true), child: const Text('Подключиться')),
+        ],
+      ),
+    );
+    if (ok == true && ctl.text.trim().isNotEmpty) {
+      await app.connectToHost(ctl.text);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Подключение запущено в фоне')));
+      }
+    }
+  }
+
+  /// Автопоиск хоста по Wi-Fi (UDP broadcast) с выбором из найденных.
+  Future<void> _discoverHosts(BuildContext context, AppState app) async {
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) => const AlertDialog(
+        content: Row(
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 16),
+            Flexible(child: Text('Поиск хоста в сети…')),
+          ],
+        ),
+      ),
+    ));
+    final List<DiscoveredHost> hosts = await app.findHosts();
+    if (!context.mounted) return;
+    Navigator.of(context).pop(); // закрыть индикатор поиска
+    if (hosts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Хост не найден. Проверьте, что хост запущен, или введите адрес вручную.')));
+      return;
+    }
+    final String? chosen = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => SimpleDialog(
+        title: const Text('Найденные хосты'),
+        children: hosts
+            .map((h) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, h.address),
+                  child: Text('${h.name} (${h.address}:${h.port})'),
+                ))
+            .toList(),
+      ),
+    );
+    if (chosen != null) {
+      await app.connectToHost(chosen);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Подключение запущено в фоне')));
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +129,26 @@ class SettingsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Настройки')),
       body: ListView(
         children: [
+          // ---------- Подключение к хосту (только клиент) ----------
+          if (!app.isHost) ...[
+            header('Подключение к хосту'),
+            ListTile(
+              leading: const Icon(Icons.dns_outlined),
+              title: const Text('Адрес хоста'),
+              subtitle: Text(app.hostAddress.isEmpty
+                  ? 'не задан'
+                  : '${app.hostAddress}:${app.hostPort}'),
+              trailing: Text(app.connectionLabel),
+              onTap: () => _editHostAddress(context, app),
+            ),
+            ListTile(
+              leading: const Icon(Icons.wifi_find),
+              title: const Text('Найти хост в сети'),
+              subtitle: const Text('автопоиск по Wi-Fi'),
+              onTap: () => _discoverHosts(context, app),
+            ),
+          ],
+
           // ---------- 6.1 Общие ----------
           header('6.1 Общие'),
           SwitchListTile(

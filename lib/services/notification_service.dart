@@ -17,11 +17,15 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _fln = FlutterLocalNotificationsPlugin();
   bool _androidReady = false;
   bool _windowsReady = false;
+  bool _inited = false;
 
   static const String _chSound = 'qp_sound';
   static const String _chSilent = 'qp_silent';
 
+  /// Идемпотентная инициализация: повторные вызовы безопасны.
   Future<void> init() async {
+    if (_inited) return;
+    _inited = true;
     if (kIsWeb) return;
     if (Platform.isAndroid) {
       const AndroidInitializationSettings androidInit =

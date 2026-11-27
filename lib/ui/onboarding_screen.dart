@@ -56,20 +56,38 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       _busy = true;
       _error = '';
     });
-    await app.chooseRole(_role);
-    await app.signIn(_nameCtl.text);
-    if (_role == DeviceRole.host) {
-      await app.init(); // перезапуск стека хоста с профилем
-    } else {
-      final String addr = _addrCtl.text.trim();
-      if (addr.isNotEmpty) {
-        await app.connectToHost(addr);
+    try {
+      await app.chooseRole(_role);
+      await app.signIn(_nameCtl.text);
+      if (_role == DeviceRole.client) {
+        final String addr = _addrCtl.text.trim();
+        if (addr.isNotEmpty) {
+          // Сохраняем адрес; подключение идёт в фоне — оффлайн-режим
+          // позволяет довести настройку до конца даже без связи.
+          await app.connectToHost(addr);
+        }
       }
-      await app.init();
+      final String? err = await app.activateAfterOnboarding();
+      if (err != null) {
+        if (mounted) {
+          setState(() {
+            _busy = false;
+            _error = err;
+          });
+        }
+        return;
+      }
+      await app.finishOnboarding();
+      if (!mounted) return;
+      Navigator.of(context).pushReplacementNamed('/');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = 'Ошибка: $e';
+        });
+      }
     }
-    await app.finishOnboarding();
-    if (!mounted) return;
-    Navigator.of(context).pushReplacementNamed('/');
   }
 
   @override
