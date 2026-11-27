@@ -182,7 +182,8 @@ class HostDatabase {
     final Note? note = notes[noteId];
     if (note == null) return HostOpResult();
     final DateTime now = DateTime.now().toUtc();
-    final Map<String, String?> before = note.fieldSnapshot(userName: userName);
+    final Map<String, String?> before = note.fieldSnapshot(
+        userName: userName, contactName: (id) => contacts[id]?.name ?? id);
     final NoteStatus oldStatus = note.status;
     final bool conflict = baseVersion < note.version;
     final List<AuditEntry> entries = [];
@@ -198,7 +199,8 @@ class HostDatabase {
 
     // Журнал: «старое → новое» по каждому изменившемуся полю.
     if (settings.auditEnabled) {
-      final Map<String, String?> after = note.fieldSnapshot(userName: userName);
+      final Map<String, String?> after = note.fieldSnapshot(
+          userName: userName, contactName: (id) => contacts[id]?.name ?? id);
       for (final String field in patch.keys) {
         final String? oldV = before[field];
         final String? newV = after[field];
@@ -348,6 +350,7 @@ class HostDatabase {
       'type': 'notify',
       'kind': NotifyKind.newNote.wire,
       'noteId': note.id,
+      'actorId': note.authorId,
       'title': 'Новая заявка от ${userName(note.authorId)}',
       'body': note.text.length > 120 ? '${note.text.substring(0, 120)}…' : note.text,
     });

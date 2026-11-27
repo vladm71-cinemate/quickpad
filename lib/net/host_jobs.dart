@@ -127,8 +127,8 @@ class HostJobs {
         'type': MsgType.notify,
         'kind': NotifyKind.escalation.wire,
         'noteId': note.id,
-        'title': 'Эскалация заявки',
-        'body': 'Заявка не взята в работу ${s.escalationMinutes} мин: ${note.text}',
+        'title': 'Заявка требует внимания',
+        'body': 'Нет реакции ${s.escalationMinutes} мин: ${note.text}',
       });
       server.broadcast({
         'type': MsgType.noteUpsert,

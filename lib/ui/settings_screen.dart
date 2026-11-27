@@ -176,11 +176,11 @@ class SettingsScreen extends StatelessWidget {
           // ---------- 6.2 Уведомления ----------
           header('6.2 Уведомления'),
           flag('notifNew', 'Новые заявки'),
-          flag('notifChanges', 'Изменения чужих заявок'),
+          flag('notifChanges', 'Изменения заявок (уведомлять о каждой правке)'),
           flag('notifReminders', 'Напоминания'),
-          flag('notifEscalation', 'Эскалация'),
+          flag('notifEscalation', '«Требует внимания» (нет реакции на заявку)'),
           flag('soundNew', 'Звук для новых заявок'),
-          flag('soundReminder', 'Звук для напоминаний и эскалации'),
+          flag('soundReminder', 'Звук для напоминаний и «Требует внимания»'),
           flag('dnd', 'Не беспокоить'),
           flag('workHoursEnabled', 'Рабочие часы для уведомлений'),
           if (s.workHoursEnabled)
@@ -245,12 +245,12 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
 
-          // ---------- 6.5 Эскалация и напоминания (хост) ----------
-          header('6.5 Эскалация и напоминания'),
-          hostFlag('Эскалация включена', hs.escalationEnabled,
+          // ---------- 6.5 «Требует внимания» и напоминания (хост) ----------
+          header('6.5 «Требует внимания» и напоминания'),
+          hostFlag('Отмечать «Требует внимания»', hs.escalationEnabled,
               (bool v) => hs.escalationEnabled = v),
           ListTile(
-            title: const Text('Эскалация, минут'),
+            title: const Text('Нет реакции, минут'),
             subtitle: const Text('по умолчанию 30 · управляется хостом'),
             trailing: SizedBox(
               width: 90,
@@ -269,14 +269,14 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
           ),
-          hostFlag('Эскалация при «Новая»', hs.escalateNew, (bool v) => hs.escalateNew = v),
-          hostFlag('Эскалация при просрочке «В работе»', hs.escalateInProgress,
+          hostFlag('Отмечать заявку «Новая»', hs.escalateNew, (bool v) => hs.escalateNew = v),
+          hostFlag('Отмечать при просрочке «В работе»', hs.escalateInProgress,
               (bool v) => hs.escalateInProgress = v),
           hostFlag('Напоминания по времени', hs.remindersEnabled,
               (bool v) => hs.remindersEnabled = v),
           hostFlag('Повторяющиеся напоминания', hs.recurringRemindersEnabled,
               (bool v) => hs.recurringRemindersEnabled = v, 'по умолчанию выключены'),
-          hostFlag('Эскалация только в рабочие часы', hs.escalationWorkHoursOnly,
+          hostFlag('Только в рабочие часы', hs.escalationWorkHoursOnly,
               (bool v) => hs.escalationWorkHoursOnly = v),
 
           // ---------- 6.6 Заявки и отображение ----------

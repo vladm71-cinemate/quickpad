@@ -198,10 +198,19 @@ class Note {
   Note copy() => Note.fromJson(toJson());
 
   /// Снимок значений полей для сравнения («старое → новое»).
-  Map<String, String?> fieldSnapshot({String Function(String userId)? userName}) {
+  /// [userName] и [contactName] переводят ID в имена для журнала.
+  Map<String, String?> fieldSnapshot({
+    String Function(String userId)? userName,
+    String Function(String contactId)? contactName,
+  }) {
     String uname(String? id) {
       if (id == null || id.isEmpty) return '—';
       return userName?.call(id) ?? id;
+    }
+
+    String cname(String? id) {
+      if (id == null || id.isEmpty) return '—';
+      return contactName?.call(id) ?? id;
     }
 
     return {
@@ -213,8 +222,8 @@ class Note {
       'reminder': reminder == null ? '—' : '${reminder!.at.toLocal().toString().substring(0, 16)} (${reminder!.recipients.label})',
       'tags': tags.isEmpty ? '—' : tags.join(', '),
       'color': colorValue == null ? 'нет метки' : '#${colorValue!.toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}',
-      'contact': contactId ?? '—',
-      'audio': audio == null ? '—' : (audio!.deleted ? 'удалено' : audio!.fileName),
+      'contact': cname(contactId),
+      'audio': audio == null ? '—' : (audio!.deleted ? 'удалено' : 'аудиозапись (${audio!.durationSec} с)'),
       'transcript': audio?.transcript ?? '—',
     };
   }

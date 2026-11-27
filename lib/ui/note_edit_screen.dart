@@ -1,15 +1,18 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
 import '../core/timefmt.dart';
+import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
 import '../services/audio_service.dart';
 import '../state/app_state.dart';
+import 'stt_helper.dart';
 
 /// Аргументы экрана редактирования.
 class NoteEditArgs {
@@ -50,6 +53,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
 
   bool _dictating = false;
   bool _recording = false;
+  bool _playingAudio = false;
   DateTime? _recStarted;
   bool _saving = false;
 
@@ -107,8 +111,9 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       _toast('На Windows используйте системную диктовку: Win+H в поле текста');
       return;
     }
+    // Ленивая инициализация: разрешение на микрофон запросится здесь.
     if (!app.stt.isAvailable && !await app.stt.init()) {
-      _toast('Распознавание недоступно: проверьте микрофон и интернет');
+      if (mounted) await showSttError(context, app.stt);
       return;
     }
     setState(() => _dictating = true);
@@ -159,9 +164,118 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     final AppState app = context.read<AppState>();
     // Расшифровка записанного файла — системным распознаванием недоступна,
     // поэтому просим пользователя надиктовать текст либо оставить без расшифровки.
-    if (app.stt.isSupported && app.stt.isAvailable) {
+    if (app.stt.isSupported) {
       _toast('Аудио прикреплено. Расшифровка: надиктуйте текст кнопкой «Диктовка».');
     }
+  }
+
+  Future<void> _toggleAudioPlay() async {
+    final AppState app = context.read<AppState>();
+    if (_playingAudio) {
+      await app.audio.stopPlay();
+      setState(() => _playingAudio = false);
+      return;
+    }
+    final AudioAttachment? att = _audio;
+    if (att == null || att.deleted) return;
+    final String loc = app.audioLocation(att.fileName);
+    if (app.isHost) {
+      await app.audio.playLocal(loc);
+    } else {
+      await app.audio.play(loc);
+    }
+    app.audio.onComplete(() {
+      if (mounted) setState(() => _playingAudio = false);
+    });
+    setState(() => _playingAudio = true);
+  }
+
+  /// Выбор контакта с поиском по вхождению (как глобальный поиск):
+  /// совпадение в любом месте имени/телефона/комментария, ближе к началу — выше.
+  Future<void> _pickContact() async {
+    final AppState app = context.read<AppState>();
+    String q = '';
+    final List<Contact> sorted = List<Contact>.from(app.contacts)
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    List<Contact> rank() {
+      final String query = q.trim().toLowerCase();
+      if (query.isEmpty) return sorted;
+      final String qd = query.replaceAll(RegExp(r'\D'), '');
+      final List<MapEntry<Contact, int>> scored = [];
+      for (final Contact c in sorted) {
+        final String corpus =
+            '${c.name}\n${c.phone}\n${c.comment}'.toLowerCase();
+        int pos = corpus.indexOf(query);
+        if (pos < 0 && qd.length >= 3) {
+          pos = c.phone.replaceAll(RegExp(r'\D'), '').indexOf(qd);
+          if (pos >= 0) pos += 1000; // телефон — после имени
+        }
+        if (pos >= 0) scored.add(MapEntry(c, pos));
+      }
+      scored.sort((a, b) => a.value.compareTo(b.value));
+      return scored.map((e) => e.key).toList();
+    }
+
+    final Contact? picked = await showDialog<Contact>(
+      context: context,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setDlg) => AlertDialog(
+          title: const Text('Выбор контакта'),
+          content: SizedBox(
+            width: 400,
+            height: 380,
+            child: Column(
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Имя или телефон…',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onChanged: (String v) => setDlg(() => q = v),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: Builder(builder: (BuildContext ctx) {
+                    final List<Contact> list = rank();
+                    if (list.isEmpty) {
+                      return const Center(child: Text('Ничего не найдено'));
+                    }
+                    return ListView.builder(
+                      itemCount: list.length,
+                      itemBuilder: (BuildContext ctx, int i) {
+                        final Contact c = list[i];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person_outline),
+                          title: Text(c.name),
+                          subtitle: c.phone.isEmpty ? null : Text(c.phone),
+                          onTap: () => Navigator.pop(ctx, c),
+                        );
+                      },
+                    );
+                  }),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            if (_contactId != null)
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, Contact(id: '', name: '')),
+                child: const Text('Убрать контакт'),
+              ),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _contactId = picked.id.isEmpty ? null : picked.id);
   }
 
   // ---------- Выбор даты/времени ----------
@@ -371,7 +485,20 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
               child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
             )
           else
-            IconButton(icon: const Icon(Icons.check), tooltip: 'Сохранить', onPressed: _save),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  textStyle: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                icon: const Icon(Icons.check_circle),
+                label: Text(_isNew ? 'Создать' : 'Сохранить'),
+                onPressed: _save,
+              ),
+            ),
         ],
       ),
       body: ListView(
@@ -411,7 +538,13 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           ),
           if (_audio != null)
             ListTile(
-              leading: const Icon(Icons.audiotrack),
+              leading: _audio!.deleted
+                  ? const Icon(Icons.audiotrack)
+                  : IconButton(
+                      icon: Icon(_playingAudio ? Icons.stop : Icons.play_arrow),
+                      tooltip: _playingAudio ? 'Стоп' : 'Прослушать',
+                      onPressed: _toggleAudioPlay,
+                    ),
               title: Text(_audio!.deleted ? 'Аудио удалено автоочисткой' : 'Аудиозапись прикреплена'),
               subtitle: _audio!.deleted ? null : Text('${_audio!.durationSec} c · ${(_audio!.sizeBytes / 1024).toStringAsFixed(0)} КБ'),
               trailing: _audio!.deleted
@@ -464,13 +597,13 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          _section('Дедлайн и напоминание'),
+          _section('Срок исполнения и напоминание'),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.event),
-                  label: Text(_deadline == null ? 'Дедлайн' : formatDateTime(_deadline!)),
+                  label: Text(_deadline == null ? 'Срок исполнения' : formatDateTime(_deadline!)),
                   onPressed: () async {
                     final DateTime? dt = await _pickDateTime(_deadline);
                     if (dt != null) setState(() => _deadline = dt);
@@ -535,22 +668,31 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           if (app.ls.contactLinkEnabled) ...[
             const SizedBox(height: 12),
             _section('Контакт'),
-            DropdownButtonFormField<String>(
-              initialValue: _contactId,
-              decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-              hint: const Text('Не выбран'),
-              items: [
-                const DropdownMenuItem<String>(value: '', child: Text('Не выбран')),
-                ...app.contacts
-                    .map((c) => DropdownMenuItem<String>(value: c.id, child: Text(c.name))),
-              ],
-              onChanged: (String? v) => setState(() => _contactId = (v == null || v.isEmpty) ? null : v),
-            ),
+            Builder(builder: (BuildContext ctx) {
+              final Contact? sel = _contactId == null
+                  ? null
+                  : app.contacts.firstWhereOrNull((c) => c.id == _contactId);
+              return OutlinedButton.icon(
+                icon: const Icon(Icons.contacts),
+                label: Text(sel == null
+                    ? 'Выбрать контакт (с поиском)'
+                    : '${sel.name}${sel.phone.isEmpty ? '' : ' · ${sel.phone}'}'),
+                onPressed: _pickContact,
+              );
+            }),
           ],
           const SizedBox(height: 24),
+          // Крупная заметная кнопка подтверждения (ТЗ: жирная, цветная).
           FilledButton.icon(
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              textStyle:
+                  const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
             onPressed: _saving ? null : _save,
-            icon: const Icon(Icons.check),
+            icon: const Icon(Icons.check_circle, size: 26),
             label: Text(_isNew ? 'Создать заявку' : 'Сохранить'),
           ),
         ],

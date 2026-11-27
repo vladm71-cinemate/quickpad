@@ -160,7 +160,9 @@ class AppState extends ChangeNotifier {
     role = prefs.getString(_kRole) == 'host' ? DeviceRole.host : DeviceRole.client;
 
     await notifications.init();
-    if (ls.sttEnabled) unawaited(stt.init());
+    // STT инициализируется лениво при первом нажатии кнопки диктовки —
+    // разрешение микрофона не запрашиваем при старте приложения.
+    unawaited(audio.cleanupTemp());
 
     if (isHost) {
       await _startHostStack();
@@ -219,6 +221,8 @@ class AppState extends ChangeNotifier {
   void _onHostBroadcast(Map<String, dynamic> msg, String? onlyUserId) {
     if (msg['type'] == MsgType.notify) {
       final String? hostUid = _server?.hostUserId;
+      // Не уведомляем автора о его собственных правках.
+      if (msg['actorId'] != null && msg['actorId'] == currentUser?.id) return;
       if (onlyUserId == null || onlyUserId == hostUid) {
         unawaited(notifications.showFromHost(msg, ls));
       }
@@ -242,6 +246,8 @@ class AppState extends ChangeNotifier {
     _client = ClientConnection(cache: _cache!);
     _client!.onDataChanged = notifyListeners;
     _client!.onNotify = (Map<String, dynamic> msg) {
+      // Не уведомляем автора о его собственных правках.
+      if (msg['actorId'] != null && msg['actorId'] == currentUser?.id) return;
       unawaited(notifications.showFromHost(msg, ls));
     };
     // Подключение — в фоне: у хоста может быть долгий TCP-таймаут,
@@ -608,13 +614,28 @@ class AppState extends ChangeNotifier {
   /// статус, приоритет, теги, контакт, ТЕЛЕФОН, расшифровка аудио, дедлайн)
   /// с сортировкой по позиции вхождения — как в 1С (чем раньше совпадение,
   /// тем выше результат).
-  List<Note> listNotes({bool mineOnly = false, String query = '', NoteStatus? status}) {
+  List<Note> listNotes({
+    bool mineOnly = false,
+    String query = '',
+    NoteStatus? status,
+    bool archive = false,
+  }) {
     final String? uid = currentUser?.id;
     Iterable<Note> list = notes;
+    if (archive) {
+      // Архив: финальные статусы.
+      list = list.where(
+          (n) => n.status == NoteStatus.done || n.status == NoteStatus.rejected);
+    } else if (status != null) {
+      list = list.where((n) => n.status == status);
+    } else {
+      // Основной список — без архивных («Выполнена»/«Отклонена» уходят в архив).
+      list = list.where(
+          (n) => n.status != NoteStatus.done && n.status != NoteStatus.rejected);
+    }
     if (mineOnly && uid != null) {
       list = list.where((n) => n.authorId == uid || n.assigneeId == uid);
     }
-    if (status != null) list = list.where((n) => n.status == status);
 
     final String q = query.trim().toLowerCase();
     if (q.isNotEmpty) {

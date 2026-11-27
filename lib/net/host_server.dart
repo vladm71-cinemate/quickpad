@@ -12,6 +12,7 @@ import '../core/constants.dart';
 import '../data/host_database.dart';
 import '../models/audit_entry.dart';
 import '../models/contact.dart';
+import '../models/enums.dart';
 import '../models/note.dart';
 import '../models/pin.dart';
 import 'protocol.dart';
@@ -239,7 +240,7 @@ class HostServer {
         final Note note = Note.fromJson((msg['note'] as Map).cast<String, dynamic>());
         final HostOpResult r =
             db.createNote(note, userId: session.userId, deviceId: session.deviceId);
-        _broadcastNoteResult(r);
+        _broadcastNoteResult(r, actorId: session.userId, isNew: true);
         break;
       case MsgType.notePatch:
         if (!sessionReady(session)) return;
@@ -250,7 +251,7 @@ class HostServer {
           userId: session.userId,
           deviceId: session.deviceId,
         );
-        _broadcastNoteResult(r);
+        _broadcastNoteResult(r, actorId: session.userId);
         break;
       case MsgType.pinSet:
         if (!sessionReady(session)) return;
@@ -289,6 +290,7 @@ class HostServer {
           'contact': c.toJson(),
           'audit': _auditJson(r.audit),
         });
+        _notifyContactChange(session.userId, r.audit.isEmpty ? null : r.audit.last.details);
         break;
       case MsgType.contactDelete:
         if (!sessionReady(session)) return;
@@ -299,6 +301,7 @@ class HostServer {
           'contactId': msg['contactId'],
           'audit': _auditJson(r.audit),
         });
+        _notifyContactChange(session.userId, r.audit.isEmpty ? null : r.audit.last.details);
         break;
       case MsgType.requestSnapshot:
         _sendSnapshot(session);
@@ -347,12 +350,45 @@ class HostServer {
 
   List<dynamic> _auditJson(List<AuditEntry> entries) => entries.map((e) => e.toJson()).toList();
 
-  void _broadcastNoteResult(HostOpResult r) {
+  void _broadcastNoteResult(HostOpResult r, {String? actorId, bool isNew = false}) {
     if (r.note == null) return;
     broadcast({
       'type': MsgType.noteUpsert,
       'note': r.note!.toJson(),
       'audit': _auditJson(r.audit),
+    });
+    // Уведомление о редактировании заявки (ТЗ 6.2, отключаемо на клиенте).
+    // Создание уведомляет HostDatabase._maybeNotifyNew; здесь — только правки.
+    if (isNew) return;
+    final List<AuditEntry> updates =
+        r.audit.where((e) => e.type == AuditType.update).toList();
+    if (updates.isEmpty) return;
+    final String who = actorId != null ? db.userName(actorId) : '';
+    final List<String> parts = updates.take(3).map((e) {
+      final String f = NoteFields.labels[e.field] ?? e.field ?? '';
+      return '$f: «${e.oldValue ?? '—'}» → «${e.newValue ?? '—'}»';
+    }).toList();
+    if (updates.length > 3) parts.add('…');
+    broadcast({
+      'type': MsgType.notify,
+      'kind': NotifyKind.noteChanged.wire,
+      'noteId': r.note!.id,
+      'actorId': actorId,
+      'title': 'Заявка изменена${who.isEmpty ? '' : ' — $who'}',
+      'body': parts.join('; '),
+    });
+  }
+
+  /// Уведомление об изменении библиотеки контактов (отключаемо на клиенте).
+  void _notifyContactChange(String? actorId, String? details) {
+    if (details == null) return;
+    final String who = actorId != null ? db.userName(actorId) : '';
+    broadcast({
+      'type': MsgType.notify,
+      'kind': NotifyKind.noteChanged.wire,
+      'actorId': actorId,
+      'title': 'Контакты',
+      'body': '${who.isEmpty ? 'Пользователь' : who}: $details',
     });
   }
 
@@ -361,7 +397,7 @@ class HostServer {
   /// Создание заявки на самом хосте — те же правила, что и у клиентов.
   void localCreateNote(Note note, {required String userId}) {
     final HostOpResult r = db.createNote(note, userId: userId, deviceId: 'host');
-    _broadcastNoteResult(r);
+    _broadcastNoteResult(r, actorId: userId, isNew: true);
   }
 
   /// Изменение полей заявки на самом хосте.
@@ -369,7 +405,7 @@ class HostServer {
       {required int baseVersion, required String userId}) {
     final HostOpResult r = db.patchNote(noteId, patch,
         baseVersion: baseVersion, userId: userId, deviceId: 'host');
-    _broadcastNoteResult(r);
+    _broadcastNoteResult(r, actorId: userId);
   }
 
   /// Закрепление/открепление пользователем хоста.
@@ -403,6 +439,7 @@ class HostServer {
       'contact': contact.toJson(),
       'audit': _auditJson(r.audit),
     });
+    _notifyContactChange(userId, r.audit.isEmpty ? null : r.audit.last.details);
   }
 
   void localDeleteContact(String contactId, {required String userId}) {
@@ -412,6 +449,7 @@ class HostServer {
       'contactId': contactId,
       'audit': _auditJson(r.audit),
     });
+    _notifyContactChange(userId, r.audit.isEmpty ? null : r.audit.last.details);
   }
 
   /// Трансляция хостовых настроек всем клиентам после изменения на хосте.

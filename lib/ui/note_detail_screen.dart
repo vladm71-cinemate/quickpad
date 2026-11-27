@@ -13,6 +13,8 @@ import '../models/note.dart';
 import '../services/voice_commands.dart';
 import '../state/app_state.dart';
 import 'note_edit_screen.dart';
+import 'phone_text.dart';
+import 'stt_helper.dart';
 
 /// Карточка заявки (ТЗ 4.3): все поля, смена статуса, закрепление,
 /// аудио + расшифровка, история изменений из журнала.
@@ -45,13 +47,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       _toast('На Windows используйте системную диктовку (Win+H)');
       return;
     }
-    if (!app.stt.isAvailable) {
-      _toast('Распознавание недоступно');
-      return;
-    }
     if (_listening) {
       await app.stt.stop();
       setState(() => _listening = false);
+      return;
+    }
+    if (!app.stt.isAvailable && !await app.stt.init()) {
+      if (mounted) await showSttError(context, app.stt);
       return;
     }
     setState(() => _listening = true);
@@ -220,7 +222,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           if (note.colorValue != null)
             Container(height: 6, color: Color(note.colorValue!)),
           const SizedBox(height: 8),
-          SelectableText(note.text, style: Theme.of(context).textTheme.titleMedium),
+          PhoneText(note.text, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 12),
           Wrap(
             spacing: 16,
@@ -229,7 +231,8 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               Text('Автор: ${app.userName(note.authorId)}'),
               Text('Создана: ${formatDateTime(note.createdAt)}'),
               Text('Изменена: ${formatRelative(note.updatedAt)}'),
-              if (note.escalated) const Text('⚠ Эскалирована', style: TextStyle(color: Colors.red)),
+              if (note.escalated)
+                const Text('⚠ Требует внимания', style: TextStyle(color: Colors.red)),
             ],
           ),
           const Divider(height: 24),
@@ -244,7 +247,7 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
           )),
           _row('Исполнитель', Text(note.assigneeId == null ? '—' : app.userName(note.assigneeId!))),
           _row('Приоритет', Text(note.priority?.label ?? '—')),
-          _row('Дедлайн', Text(note.deadline == null
+          _row('Срок исполнения', Text(note.deadline == null
               ? '—'
               : '${formatDateTime(note.deadline!)} (${formatDeadline(note.deadline!)})')),
           _row('Напоминание', Text(note.reminder == null

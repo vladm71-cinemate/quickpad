@@ -130,6 +130,23 @@ class AudioService {
     _player.onPlayerComplete.listen((_) => cb());
   }
 
+  /// Удалить временные файлы записей старше суток (локальный след аудио на
+  /// устройстве; сами вложения хранятся на хосте и удаляются по настройке
+  /// «Срок хранения аудио» — тогда прослушивание отключается на всех устройствах).
+  Future<void> cleanupTemp() async {
+    try {
+      final Directory dir = await getTemporaryDirectory();
+      await for (final FileSystemEntity e in dir.list()) {
+        if (e is File && e.path.endsWith(kAudioExt)) {
+          final FileStat stat = await e.stat();
+          if (DateTime.now().difference(stat.modified) > const Duration(days: 1)) {
+            await e.delete();
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
   void dispose() {
     unawaited(_recorder.dispose());
     unawaited(_player.dispose());

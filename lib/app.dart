@@ -7,6 +7,7 @@ import 'state/app_state.dart';
 import 'state/settings_controller.dart';
 import 'ui/audit_screen.dart';
 import 'ui/contacts_screen.dart';
+import 'ui/help_screen.dart';
 import 'ui/home_screen.dart';
 import 'ui/note_detail_screen.dart';
 import 'ui/note_edit_screen.dart';
@@ -73,6 +74,9 @@ class _QuickPadAppState extends State<QuickPadApp> {
             break;
           case '/settings':
             page = const SettingsScreen();
+            break;
+          case '/help':
+            page = const HelpScreen();
             break;
           default:
             page = const HomeScreen();

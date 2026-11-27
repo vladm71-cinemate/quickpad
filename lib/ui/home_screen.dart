@@ -13,6 +13,7 @@ import '../models/note.dart';
 import '../services/voice_commands.dart';
 import '../state/app_state.dart';
 import 'note_edit_screen.dart';
+import 'stt_helper.dart';
 
 /// Главный экран (ТЗ 4.2): сводка дня, поиск, фильтры, список заявок,
 /// индикатор связи, кнопки «+» и голосовых команд.
@@ -26,6 +27,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _query = '';
   bool _mineOnly = false;
+  bool _archive = false;
   NoteStatus? _statusFilter;
   Timer? _timer;
   bool _listening = false;
@@ -64,8 +66,9 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _listening = false);
       return;
     }
-    if (!app.stt.isAvailable) {
-      _toast('Распознавание речи недоступно. Проверьте микрофон и интернет.');
+    // Ленивая инициализация: разрешение запрашивается здесь, при первом нажатии.
+    if (!app.stt.isAvailable && !await app.stt.init()) {
+      if (mounted) await showSttError(context, app.stt);
       return;
     }
     setState(() => _listening = true);
@@ -192,11 +195,12 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final AppState app = context.watch<AppState>();
-    final List<Note> notes = app.listNotes(mineOnly: _mineOnly, query: _query, status: _statusFilter);
+    final List<Note> notes = app.listNotes(
+        mineOnly: _mineOnly, query: _query, status: _statusFilter, archive: _archive);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(kAppName),
+        title: Text(_archive ? 'Архив заявок' : kAppName),
         actions: [
           if (app.ls.showConnIndicator) _connIndicator(app),
           IconButton(
@@ -228,21 +232,27 @@ class _HomeScreenState extends State<HomeScreen> {
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               children: [
-                _chip('Все', !_mineOnly && _statusFilter == null,
-                    () => setState(() { _mineOnly = false; _statusFilter = null; })),
-                _chip('Мои', _mineOnly, () => setState(() => _mineOnly = true)),
+                _chip('Все', !_mineOnly && _statusFilter == null && !_archive,
+                    () => setState(() { _mineOnly = false; _statusFilter = null; _archive = false; })),
+                _chip('Мои', _mineOnly, () => setState(() { _mineOnly = true; _archive = false; })),
+                _chip('Архив', _archive,
+                    () => setState(() { _archive = !_archive; _mineOnly = false; _statusFilter = null; })),
                 const SizedBox(width: 8),
                 ...NoteStatus.values.map((s) => _chip(
                     s.label, _statusFilter == s, () => setState(() {
                       _statusFilter = _statusFilter == s ? null : s;
                       _mineOnly = false;
+                      _archive = false;
                     }))),
               ],
             ),
           ),
           Expanded(
             child: notes.isEmpty
-                ? const Center(child: Text('Заявок нет. Нажмите «+», чтобы создать.'))
+                ? Center(
+                    child: Text(_archive
+                        ? 'Архив пуст. Выполненные и отклонённые заявки появятся здесь.'
+                        : 'Заявок нет. Нажмите «+», чтобы создать.'))
                 : ListView.builder(
                     padding: const EdgeInsets.only(bottom: 96),
                     itemCount: notes.length,
@@ -398,7 +408,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Text('${app.userName(n.authorId)} · ${formatRelative(n.createdAt)}',
                               style: Theme.of(context).textTheme.bodySmall),
                           if (n.deadline != null)
-                            Text('Дедлайн: ${formatDeadline(n.deadline!)}',
+                            Text('Срок: ${formatDeadline(n.deadline!)}',
                                 style: Theme.of(context)
                                     .textTheme
                                     .bodySmall
@@ -452,6 +462,18 @@ class _HomeScreenState extends State<HomeScreen> {
             currentAccountPicture: const CircleAvatar(child: Icon(Icons.person)),
           ),
           ListTile(
+            leading: const Icon(Icons.archive_outlined),
+            title: const Text('Архив'),
+            onTap: () {
+              Navigator.pop(context);
+              setState(() {
+                _archive = true;
+                _mineOnly = false;
+                _statusFilter = null;
+              });
+            },
+          ),
+          ListTile(
             leading: const Icon(Icons.contacts),
             title: const Text('Контакты'),
             onTap: () {
@@ -481,6 +503,14 @@ class _HomeScreenState extends State<HomeScreen> {
             onTap: () {
               Navigator.pop(context);
               Navigator.of(context).pushNamed('/settings');
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.help_outline),
+            title: const Text('Справка'),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.of(context).pushNamed('/help');
             },
           ),
         ],

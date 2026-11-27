@@ -87,6 +87,10 @@ class UsersScreen extends StatelessWidget {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // Войти под чужим профилем нельзя: каждый пользователь
+                    // привязан к своему устройству — иначе журнал изменений
+                    // будет показывать не того автора. (Смену можно включить
+                    // в Настройках → Пользователи, по умолчанию выключена.)
                     if (app.ls.allowUserSwitch)
                       TextButton(
                         onPressed: () async {
@@ -94,6 +98,15 @@ class UsersScreen extends StatelessWidget {
                           if (context.mounted) Navigator.of(context).pop();
                         },
                         child: const Text('Войти'),
+                      )
+                    else
+                      const Tooltip(
+                        message: 'Вход только в свой профиль. Чужой профиль '
+                            'доступен только на устройстве его владельца.',
+                        child: Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.lock_outline, size: 18),
+                        ),
                       ),
                     if (app.isHost)
                       IconButton(
