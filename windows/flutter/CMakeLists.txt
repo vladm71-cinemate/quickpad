@@ -1,20 +1,14 @@
-# Flutter library and tool build rules.
-set(FLUTTER_MANAGED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/flutter" PARENT_SCOPE)
+# This file controls Flutter-level build steps. It should not be edited.
+cmake_minimum_required(VERSION 3.14)
 
-# EP_HOST is used by the generated rules for the Flutter build.
-if(NOT DEFINED EP_HOST)
-  get_filename_component(EP_HOST "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
-endif()
-
-# The Flutter tool uses this to find the flutter directory from the runner.
-set(FLUTTER_EPHEMERAL_DIR "${EP_HOST}/flutter/ephemeral")
+set(EPHEMERAL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ephemeral")
 
 # Configuration provided via flutter tool.
-include(${FLUTTER_EPHEMERAL_DIR}/generated_config.cmake)
+include(${EPHEMERAL_DIR}/generated_config.cmake)
 
 # TODO: Move the rest of this into files in ephemeral. See
 # https://github.com/flutter/flutter/issues/57146.
-set(WRAPPER_ROOT "${FLUTTER_EPHEMERAL_DIR}/cpp_client_wrapper")
+set(WRAPPER_ROOT "${EPHEMERAL_DIR}/cpp_client_wrapper")
 
 # Set fallback configurations for older versions of the flutter tool.
 if (NOT DEFINED FLUTTER_TARGET_PLATFORM)
@@ -22,11 +16,11 @@ if (NOT DEFINED FLUTTER_TARGET_PLATFORM)
 endif()
 
 # === Flutter Library ===
-set(FLUTTER_LIBRARY "${FLUTTER_EPHEMERAL_DIR}/flutter_windows.dll")
+set(FLUTTER_LIBRARY "${EPHEMERAL_DIR}/flutter_windows.dll")
 
 # Published to parent scope for install step.
 set(FLUTTER_LIBRARY ${FLUTTER_LIBRARY} PARENT_SCOPE)
-set(FLUTTER_ICU_DATA_FILE "${FLUTTER_EPHEMERAL_DIR}/icudtl.dat" PARENT_SCOPE)
+set(FLUTTER_ICU_DATA_FILE "${EPHEMERAL_DIR}/icudtl.dat" PARENT_SCOPE)
 set(PROJECT_BUILD_DIR "${PROJECT_DIR}/build/" PARENT_SCOPE)
 set(AOT_LIBRARY "${PROJECT_DIR}/build/windows/app.so" PARENT_SCOPE)
 
@@ -37,10 +31,10 @@ list(APPEND FLUTTER_LIBRARY_HEADERS
   "flutter_plugin_registrar.h"
   "flutter_texture_registrar.h"
 )
-list(TRANSFORM FLUTTER_LIBRARY_HEADERS PREPEND "${FLUTTER_EPHEMERAL_DIR}/")
+list(TRANSFORM FLUTTER_LIBRARY_HEADERS PREPEND "${EPHEMERAL_DIR}/")
 add_library(flutter INTERFACE)
 target_include_directories(flutter INTERFACE
-  "${FLUTTER_EPHEMERAL_DIR}"
+  "${EPHEMERAL_DIR}"
 )
 target_link_libraries(flutter INTERFACE "${FLUTTER_LIBRARY}.lib")
 add_dependencies(flutter flutter_assemble)
