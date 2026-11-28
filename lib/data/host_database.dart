@@ -97,6 +97,14 @@ class HostDatabase {
   void saveContacts() => _save('contacts.json', contacts.values.map((e) => e.toJson()).toList());
   void savePins() => _save('pins.json', pins.values.map((e) => e.toJson()).toList());
   void saveAudit() => _save('audit.json', audit.map((e) => e.toJson()).toList());
+
+  /// Полная очистка журнала аудита (ТЗ: очистка журнала у хоста).
+  /// Клиенты получают сигнал и тоже чистят локальную копию.
+  void clearAudit() {
+    audit.clear();
+    saveAudit();
+    broadcast?.call({'type': 'audit_cleared'});
+  }
   void saveMessages() => _save('messages.json', messages.map((e) => e.toJson()).toList());
   void saveSettings() => unawaited(_store.writeNow('host_settings.json', settings.toJson()));
 

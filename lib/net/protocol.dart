@@ -38,6 +38,7 @@ class MsgType {
   static const String chatMessage = 'chat_message';
   static const String chatDeleted = 'chat_deleted';
   static const String chatCleared = 'chat_cleared';
+  static const String auditCleared = 'audit_cleared';
   static const String pong = 'pong';
 }
 

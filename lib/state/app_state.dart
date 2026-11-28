@@ -571,7 +571,7 @@ class AppState extends ChangeNotifier {
     int? colorValue,
     String? contactId,
     AudioAttachment? audioAttachment,
-    PhotoAttachment? photoAttachment,
+    List<PhotoAttachment> photoAttachments = const [],
   }) async {
     final AppUser me = currentUser!;
     final Note note = Note(
@@ -587,7 +587,7 @@ class AppState extends ChangeNotifier {
       colorValue: colorValue,
       contactId: contactId,
       audio: audioAttachment,
-      photo: photoAttachment,
+      photos: List<PhotoAttachment>.from(photoAttachments),
     );
     if (isHost) {
       _server?.localCreateNote(note, userId: me.id);
@@ -618,6 +618,10 @@ class AppState extends ChangeNotifier {
     if (before.contactId != after.contactId) p[NoteFields.contact] = after.contactId;
     if (jsonEncode(before.audio?.toJson()) != jsonEncode(after.audio?.toJson())) {
       p[NoteFields.audio] = after.audio?.toJson();
+    }
+    if (jsonEncode(before.photos.map((e) => e.toJson()).toList()) !=
+        jsonEncode(after.photos.map((e) => e.toJson()).toList())) {
+      p[NoteFields.photos] = after.photos.map((e) => e.toJson()).toList();
     }
     return p;
   }
@@ -743,6 +747,107 @@ class AppState extends ChangeNotifier {
   Future<void> setUserRole(AppUser user, String role) async {
     if (!isHost || _db == null) return;
     _db!.setUserRole(user.id, role, actorId: currentUser?.id ?? 'host');
+    notifyListeners();
+  }
+
+  // ---------- Очистка кэша и журнала ----------
+
+  /// Имена файлов, которые реально используются (аудио заявок, фото,
+  /// аудио сообщений чата) — всё остальное в папке хоста считается мусором.
+  Set<String> _referencedFiles() {
+    final Set<String> used = <String>{};
+    for (final Note n in notes) {
+      final AudioAttachment? a = n.audio;
+      if (a != null && !a.deleted) used.add(a.fileName);
+      for (final PhotoAttachment p in n.photos) {
+        used.add(p.fileName);
+      }
+    }
+    for (final ChatMessage m in messages) {
+      if (m.audioFileName != null && m.audioFileName!.isNotEmpty) {
+        used.add(m.audioFileName!);
+      }
+    }
+    return used;
+  }
+
+  /// Статистика кэша: временные файлы устройства и (на хосте) файлы-сироты.
+  Future<({int tempBytes, int orphanBytes, int orphanCount})>
+      cacheStats() async {
+    int tempBytes = 0;
+    try {
+      final Directory tmp = await getTemporaryDirectory();
+      if (await tmp.exists()) {
+        await for (final FileSystemEntity e in tmp.list(recursive: true)) {
+          if (e is File) {
+            try {
+              tempBytes += await e.length();
+            } catch (_) {}
+          }
+        }
+      }
+    } catch (_) {}
+    int orphanBytes = 0;
+    int orphanCount = 0;
+    if (isHost && _server != null) {
+      final Set<String> used = _referencedFiles();
+      try {
+        await for (final FileSystemEntity e in _server!.audioDir.list()) {
+          if (e is File && !used.contains(e.uri.pathSegments.last)) {
+            orphanCount++;
+            try {
+              orphanBytes += await e.length();
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    return (
+      tempBytes: tempBytes,
+      orphanBytes: orphanBytes,
+      orphanCount: orphanCount
+    );
+  }
+
+  /// Очистка кэша: временные файлы этого устройства (черновики записей,
+  /// WAV гибридной диктовки, файлы экспорта) + на хосте файлы без заявок.
+  /// Заявки, вложения и настройки не трогаем. Возвращает (байт, файлов).
+  Future<({int bytes, int files})> clearCache() async {
+    int bytes = 0;
+    int files = 0;
+    try {
+      final Directory tmp = await getTemporaryDirectory();
+      if (await tmp.exists()) {
+        await for (final FileSystemEntity e in tmp.list(recursive: true)) {
+          try {
+            if (e is File) bytes += await e.length();
+            await e.delete(recursive: true);
+            files++;
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    if (isHost && _server != null) {
+      final Set<String> used = _referencedFiles();
+      try {
+        await for (final FileSystemEntity e in _server!.audioDir.list()) {
+          if (e is File && !used.contains(e.uri.pathSegments.last)) {
+            try {
+              bytes += await e.length();
+              await e.delete();
+              files++;
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+    }
+    return (bytes: bytes, files: files);
+  }
+
+  /// Полная очистка журнала аудита (только хост; клиенты получают сигнал).
+  Future<void> clearAudit() async {
+    if (!isHost || _db == null) return;
+    _db!.clearAudit();
     notifyListeners();
   }
 

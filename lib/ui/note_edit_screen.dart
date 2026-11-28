@@ -59,7 +59,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
   int? _colorValue;
   String? _contactId;
   AudioAttachment? _audio;
-  PhotoAttachment? _photo;
+  final List<PhotoAttachment> _photos = [];
 
   bool _dictating = false;
   bool _recording = false;
@@ -100,7 +100,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
         _colorValue = n.colorValue;
         _contactId = n.contactId;
         _audio = n.audio;
-        _photo = n.photo;
+        _photos.addAll(n.photos);
         _tagsCtl.text = n.tags.join(', ');
       }
     } else if (args?.initialText != null) {
@@ -469,7 +469,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
       _toast('Не удалось передать фото на хост');
       return;
     }
-    setState(() => _photo = att);
+    setState(() => _photos.add(att));
   }
 
   Future<void> _toggleAudioPlay() async {
@@ -863,7 +863,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
         colorValue: _colorValue,
         contactId: _contactId,
         audioAttachment: _audio,
-        photoAttachment: _photo,
+        photoAttachments: _photos,
       );
     } else {
       final Note after = _original!.copy()
@@ -877,7 +877,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
         ..colorValue = _colorValue
         ..contactId = _contactId
         ..audio = _audio
-        ..photo = _photo;
+        ..photos = List<PhotoAttachment>.from(_photos);
       await app.updateNote(_original!, after);
     }
     if (!mounted) return;
@@ -1000,26 +1000,38 @@ class _NoteEditScreenState extends State<NoteEditScreen>
                       onPressed: () => setState(() => _audio = null),
                     ),
             ),
-          // Фотография к заявке.
+          // Фотографии к заявке (любое количество, уходят на хост и всем).
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Row(
-              children: [
-                if (_photo != null)
-                  photoThumb(context, app, _photo!.fileName,
-                      onRemove: () => setState(() => _photo = null))
-                else
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.add_a_photo_outlined),
-                    label: const Text('Фото'),
+            child: SizedBox(
+              height: 84,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (int i = 0; i < _photos.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: photoThumb(context, app, _photos[i].fileName,
+                          size: 84,
+                          onRemove: () => setState(() => _photos.removeAt(i))),
+                    ),
+                  // Кнопка «добавить фото» — всегда доступна.
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(84, 84),
+                        padding: EdgeInsets.zero),
                     onPressed: _pickPhoto,
+                    child: const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.add_a_photo_outlined),
+                        SizedBox(height: 2),
+                        Text('Фото', style: TextStyle(fontSize: 11)),
+                      ],
+                    ),
                   ),
-                if (_photo != null) ...[
-                  const SizedBox(width: 12),
-                  Text('${(_photo!.sizeBytes / 1024).toStringAsFixed(0)} КБ · нажмите для просмотра',
-                      style: Theme.of(context).textTheme.bodySmall),
                 ],
-              ],
+              ),
             ),
           ),
           const Divider(height: 24),

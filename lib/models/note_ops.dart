@@ -39,6 +39,12 @@ void applyPatchToNote(Note note, Map<String, dynamic> patch) {
             ? AudioAttachment.fromJson((value as Map).cast<String, dynamic>())
             : null;
         break;
+      case NoteFields.photos:
+        note.photos = (value as List?)
+                ?.map((e) => PhotoAttachment.fromJson((e as Map).cast<String, dynamic>()))
+                .toList() ??
+            <PhotoAttachment>[];
+        break;
       case NoteFields.transcript:
         note.audio?.transcript = value as String?;
         break;

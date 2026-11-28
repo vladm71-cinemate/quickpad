@@ -290,11 +290,18 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
                   : null,
             ),
           ],
-          if (note.photo != null) ...[
+          if (note.photos.isNotEmpty) ...[
             const Divider(height: 24),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: photoThumb(context, app, note.photo!.fileName, size: 180),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (int i = 0; i < note.photos.length; i++)
+                  photoThumb(context, app, note.photos[i].fileName,
+                      size: 180,
+                      allPhotos: note.photos.map((p) => p.fileName).toList(),
+                      initialIndex: i),
+              ],
             ),
           ],
           const Divider(height: 24),

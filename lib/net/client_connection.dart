@@ -245,6 +245,12 @@ class ClientConnection extends ChangeNotifier {
         if (s is Map) cache.applyHostSettings(s.cast<String, dynamic>());
         onDataChanged?.call();
         break;
+      case MsgType.auditCleared:
+        // Хост очистил журнал — чистим локальную копию.
+        cache.audit.clear();
+        cache.saveAudit();
+        onDataChanged?.call();
+        break;
       case MsgType.notify:
         onNotify?.call(msg);
         break;

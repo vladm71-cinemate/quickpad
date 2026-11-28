@@ -129,12 +129,13 @@ class Note {
     this.colorValue,
     this.contactId,
     this.audio,
-    this.photo,
+    List<PhotoAttachment>? photos,
     DateTime? updatedAt,
     this.version = 1,
     this.escalated = false,
     this.escalatedAt,
   })  : tags = tags ?? <String>[],
+        photos = photos ?? <PhotoAttachment>[],
         updatedAt = updatedAt ?? createdAt;
 
   final String id;
@@ -155,8 +156,9 @@ class Note {
   String? contactId;
   AudioAttachment? audio;
 
-  /// Фотография к заявке (необязательно).
-  PhotoAttachment? photo;
+  /// Фотографии к заявке (необязательно, любое количество).
+  /// Файлы лежат на хосте рядом с аудио и раздаются всем устройствам.
+  List<PhotoAttachment> photos;
 
   /// Время последнего изменения на хосте и номер версии (для конфликтов).
   DateTime updatedAt;
@@ -191,7 +193,7 @@ class Note {
         'colorValue': colorValue,
         'contactId': contactId,
         'audio': audio?.toJson(),
-        'photo': photo?.toJson(),
+        'photos': photos.map((e) => e.toJson()).toList(),
         'updatedAt': updatedAt.toIso8601String(),
         'version': version,
         'escalated': escalated,
@@ -212,7 +214,13 @@ class Note {
         colorValue: (j['colorValue'] as num?)?.toInt(),
         contactId: j['contactId'] as String?,
         audio: j['audio'] != null ? AudioAttachment.fromJson(j['audio'] as Map<String, dynamic>) : null,
-        photo: j['photo'] != null ? PhotoAttachment.fromJson(j['photo'] as Map<String, dynamic>) : null,
+        photos: (j['photos'] as List?)
+                ?.map((e) => PhotoAttachment.fromJson((e as Map).cast<String, dynamic>()))
+                .toList() ??
+            // Совместимость со старым форматом (одно фото).
+            (j['photo'] != null
+                ? [PhotoAttachment.fromJson((j['photo'] as Map).cast<String, dynamic>())]
+                : <PhotoAttachment>[]),
         updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now().toUtc(),
         version: (j['version'] as num?)?.toInt() ?? 1,
         escalated: j['escalated'] as bool? ?? false,
@@ -249,7 +257,9 @@ class Note {
       'contact': cname(contactId),
       'audio': audio == null ? '—' : (audio!.deleted ? 'удалено' : 'аудиозапись (${audio!.durationSec} с)'),
       'transcript': audio?.transcript ?? '—',
-      'photo': photo == null ? '—' : 'фото (${(photo!.sizeBytes / 1024).toStringAsFixed(0)} КБ)',
+      'photo': photos.isEmpty
+          ? '—'
+          : 'фото ×${photos.length} (${(photos.fold<int>(0, (s, p) => s + p.sizeBytes) / 1024).toStringAsFixed(0)} КБ)',
     };
   }
 }

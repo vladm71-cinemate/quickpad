@@ -48,6 +48,94 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  /// Очистка кэша: временные файлы, кэш картинок, на хосте — ещё и
+  /// файлы без заявок. Показывает, сколько места освободится/освобождено.
+  Future<void> _cacheCleanup(BuildContext context, AppState app) async {
+    String fmt(int b) => b >= 1048576
+        ? '${(b / 1048576).toStringAsFixed(1)} МБ'
+        : '${(b / 1024).toStringAsFixed(0)} КБ';
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setDlg) {
+          return FutureBuilder<({int tempBytes, int orphanBytes, int orphanCount})>(
+            future: app.cacheStats(),
+            builder: (BuildContext ctx, snapshot) {
+              final s = snapshot.data;
+              final int total =
+                  s == null ? 0 : s.tempBytes + s.orphanBytes;
+              return AlertDialog(
+                title: const Text('Очистка кэша'),
+                content: s == null
+                    ? const SizedBox(
+                        height: 60,
+                        child: Center(child: CircularProgressIndicator()))
+                    : Text('Временные файлы: ${fmt(s.tempBytes)}\n'
+                        '${app.isHost ? 'Файлы без заявок на хосте: ${s.orphanCount} шт · ${fmt(s.orphanBytes)}\n' : ''}'
+                        'Плюс кэш просмотренных фото (в памяти).\n\n'
+                        'Заявки, вложения и настройки не затрагиваются.'),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Отмена')),
+                  FilledButton.icon(
+                    icon: const Icon(Icons.cleaning_services),
+                    label: Text(s == null || total == 0
+                        ? 'Очистить'
+                        : 'Очистить ${fmt(total)}'),
+                    onPressed: s == null
+                        ? null
+                        : () async {
+                            final r = await app.clearCache();
+                            // Сбрасываем и кэш картинок Flutter (просмотренные фото).
+                            PaintingBinding.instance.imageCache.clear();
+                            PaintingBinding.instance.imageCache
+                                .clearLiveImages();
+                            if (ctx.mounted) {
+                              Navigator.pop(ctx);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                      content: Text('Кэш очищен: '
+                                          '${r.files} файлов, ${fmt(r.bytes)}')));
+                            }
+                          },
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  /// Подтверждение полной очистки журнала аудита на хосте.
+  Future<void> _confirmClearAudit(BuildContext context, AppState app) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Очистить журнал?'),
+        content: Text('Записей: ${app.audit.length}. История изменений всех '
+            'заявок будет удалена на хосте и на всех устройствах. '
+            'Сами заявки останутся.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Очистить')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await app.clearAudit();
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Журнал очищен')));
+    }
+  }
+
   /// Редактор шаблонов заявки: список фраз, добавление/правка/удаление.
   Future<void> _editTemplates(
       BuildContext context, SettingsController sc) async {
@@ -653,6 +741,25 @@ class SettingsScreen extends StatelessWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _editTemplates(context, sc),
           ),
+
+          // ---------- Хранилище: очистка кэша и журнала ----------
+          header('Хранилище'),
+          ListTile(
+            leading: const Icon(Icons.cleaning_services_outlined),
+            title: const Text('Очистка кэша'),
+            subtitle: Text(app.isHost
+                ? 'временные файлы, кэш фото и файлы без заявок на хосте'
+                : 'временные файлы и кэш фото на устройстве'),
+            onTap: () => _cacheCleanup(context, app),
+          ),
+          if (app.isHost)
+            ListTile(
+              leading: const Icon(Icons.history_toggle_off),
+              title: const Text('Очистить журнал'),
+              subtitle: const Text(
+                  'история изменений удалится на хосте и на всех устройствах'),
+              onTap: () => _confirmClearAudit(context, app),
+            ),
 
           const SizedBox(height: 24),
           ListTile(

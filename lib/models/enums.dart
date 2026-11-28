@@ -110,6 +110,7 @@ class NoteFields {
   static const String contact = 'contact';
   static const String audio = 'audio';
   static const String transcript = 'transcript';
+  static const String photos = 'photos';
 
   /// Человекочитаемые названия полей для истории.
   static const Map<String, String> labels = {
@@ -124,5 +125,6 @@ class NoteFields {
     contact: 'Контакт',
     audio: 'Аудио',
     transcript: 'Расшифровка',
+    photos: 'Фото',
   };
 }
