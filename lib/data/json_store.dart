@@ -53,7 +53,15 @@ class JsonStore {
     try {
       if (await f.exists()) await f.copy(bak.path);
     } catch (_) {}
-    await tmp.rename(f.path);
+    try {
+      await tmp.rename(f.path);
+    } on PathNotFoundException {
+      // Каталог данных удалён между записью и rename (очистка данных,
+      // teardown теста) — отложенная запись просто теряется, это не ошибка.
+      try {
+        await tmp.delete();
+      } catch (_) {}
+    }
   }
 
   /// Запись с дебаунсом (по умолчанию 800 мс).
