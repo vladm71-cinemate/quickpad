@@ -95,6 +95,24 @@ class AudioAttachment {
       );
 }
 
+/// Фотография к заявке (документ, брак, «что привезти»).
+/// Файл лежит на хосте рядом с аудио, раздаётся по тому же HTTP.
+class PhotoAttachment {
+  PhotoAttachment({required this.fileName, this.sizeBytes = 0});
+
+  /// Имя файла на хосте.
+  final String fileName;
+  final int sizeBytes;
+
+  Map<String, dynamic> toJson() =>
+      {'fileName': fileName, 'sizeBytes': sizeBytes};
+
+  factory PhotoAttachment.fromJson(Map<String, dynamic> j) => PhotoAttachment(
+        fileName: j['fileName'] as String,
+        sizeBytes: (j['sizeBytes'] as num?)?.toInt() ?? 0,
+      );
+}
+
 /// Заявка / заметка.
 class Note {
   Note({
@@ -111,6 +129,7 @@ class Note {
     this.colorValue,
     this.contactId,
     this.audio,
+    this.photo,
     DateTime? updatedAt,
     this.version = 1,
     this.escalated = false,
@@ -135,6 +154,9 @@ class Note {
   int? colorValue;
   String? contactId;
   AudioAttachment? audio;
+
+  /// Фотография к заявке (необязательно).
+  PhotoAttachment? photo;
 
   /// Время последнего изменения на хосте и номер версии (для конфликтов).
   DateTime updatedAt;
@@ -169,6 +191,7 @@ class Note {
         'colorValue': colorValue,
         'contactId': contactId,
         'audio': audio?.toJson(),
+        'photo': photo?.toJson(),
         'updatedAt': updatedAt.toIso8601String(),
         'version': version,
         'escalated': escalated,
@@ -189,6 +212,7 @@ class Note {
         colorValue: (j['colorValue'] as num?)?.toInt(),
         contactId: j['contactId'] as String?,
         audio: j['audio'] != null ? AudioAttachment.fromJson(j['audio'] as Map<String, dynamic>) : null,
+        photo: j['photo'] != null ? PhotoAttachment.fromJson(j['photo'] as Map<String, dynamic>) : null,
         updatedAt: DateTime.tryParse(j['updatedAt'] as String? ?? '') ?? DateTime.now().toUtc(),
         version: (j['version'] as num?)?.toInt() ?? 1,
         escalated: j['escalated'] as bool? ?? false,
@@ -225,6 +249,7 @@ class Note {
       'contact': cname(contactId),
       'audio': audio == null ? '—' : (audio!.deleted ? 'удалено' : 'аудиозапись (${audio!.durationSec} с)'),
       'transcript': audio?.transcript ?? '—',
+      'photo': photo == null ? '—' : 'фото (${(photo!.sizeBytes / 1024).toStringAsFixed(0)} КБ)',
     };
   }
 }

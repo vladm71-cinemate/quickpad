@@ -20,6 +20,7 @@ import '../models/enums.dart';
 import '../models/note.dart';
 import '../models/note_ops.dart';
 import '../models/pin.dart';
+import '../services/photo_service.dart';
 import '../models/settings.dart';
 import '../models/user.dart';
 import '../net/client_connection.dart';
@@ -561,6 +562,7 @@ class AppState extends ChangeNotifier {
     int? colorValue,
     String? contactId,
     AudioAttachment? audioAttachment,
+    PhotoAttachment? photoAttachment,
   }) async {
     final AppUser me = currentUser!;
     final Note note = Note(
@@ -576,6 +578,7 @@ class AppState extends ChangeNotifier {
       colorValue: colorValue,
       contactId: contactId,
       audio: audioAttachment,
+      photo: photoAttachment,
     );
     if (isHost) {
       _server?.localCreateNote(note, userId: me.id);
@@ -780,6 +783,28 @@ class AppState extends ChangeNotifier {
       return '${_server!.audioDir.path}${Platform.pathSeparator}$fileName';
     }
     return 'http://$hostAddress:$hostPort/audio/$fileName';
+  }
+
+  // ---------- Фото к заявке ----------
+
+  /// Прикрепить выбранное фото (копирование на хосте / HTTP-загрузка
+  /// с клиента). Тот же транспорт, что и у аудио.
+  Future<PhotoAttachment?> attachPhoto(PickedPhoto photo) async {
+    if (isHost && _server != null) {
+      try {
+        final File dest = File(
+            '${_server!.audioDir.path}${Platform.pathSeparator}${photo.fileName}');
+        await File(photo.path).copy(dest.path);
+        final int size = await dest.length();
+        return PhotoAttachment(fileName: photo.fileName, sizeBytes: size);
+      } catch (_) {
+        return null;
+      }
+    }
+    final int? size =
+        await audio.uploadFile(hostAddress, hostPort, photo.fileName, File(photo.path));
+    if (size == null) return null;
+    return PhotoAttachment(fileName: photo.fileName, sizeBytes: size);
   }
 
   // ---------- Выборки для UI ----------

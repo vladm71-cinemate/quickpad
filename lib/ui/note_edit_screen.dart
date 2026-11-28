@@ -16,7 +16,9 @@ import '../models/enums.dart';
 import '../models/note.dart';
 import '../models/user.dart';
 import '../services/audio_service.dart';
+import '../services/photo_service.dart';
 import '../state/app_state.dart';
+import 'photo_view.dart';
 
 /// Аргументы экрана редактирования.
 class NoteEditArgs {
@@ -55,6 +57,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   int? _colorValue;
   String? _contactId;
   AudioAttachment? _audio;
+  PhotoAttachment? _photo;
 
   bool _dictating = false;
   bool _recording = false;
@@ -66,6 +69,8 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   bool _saving = false;
 
   bool get _isNew => _original == null;
+
+  final PhotoService _photoService = PhotoService();
 
   @override
   void initState() {
@@ -92,6 +97,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         _colorValue = n.colorValue;
         _contactId = n.contactId;
         _audio = n.audio;
+        _photo = n.photo;
         _tagsCtl.text = n.tags.join(', ');
       }
     } else if (args?.initialText != null) {
@@ -383,6 +389,48 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       }
     }
     setState(() => _audio = att);
+  }
+
+  /// Выбор фото: на телефоне — камера или галерея, на ПК — файл.
+  Future<void> _pickPhoto() async {
+    final AppState app = context.read<AppState>();
+    PickedPhoto? picked;
+    if (Platform.isAndroid || Platform.isIOS) {
+      final String? src = await showModalBottomSheet<String>(
+        context: context,
+        builder: (BuildContext ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_camera),
+                title: const Text('Снять на камеру'),
+                onTap: () => Navigator.pop(ctx, 'camera'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library),
+                title: const Text('Выбрать из галереи'),
+                onTap: () => Navigator.pop(ctx, 'gallery'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (src == 'camera') {
+        picked = await _photoService.pickFromCamera();
+      } else if (src == 'gallery') {
+        picked = await _photoService.pickFromGallery();
+      }
+    } else {
+      picked = await _photoService.pickFromFile();
+    }
+    if (picked == null) return;
+    final PhotoAttachment? att = await app.attachPhoto(picked);
+    if (att == null) {
+      _toast('Не удалось передать фото на хост');
+      return;
+    }
+    setState(() => _photo = att);
   }
 
   Future<void> _toggleAudioPlay() async {
@@ -743,6 +791,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         colorValue: _colorValue,
         contactId: _contactId,
         audioAttachment: _audio,
+        photoAttachment: _photo,
       );
     } else {
       final Note after = _original!.copy()
@@ -755,7 +804,8 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         ..tags = tags
         ..colorValue = _colorValue
         ..contactId = _contactId
-        ..audio = _audio;
+        ..audio = _audio
+        ..photo = _photo;
       await app.updateNote(_original!, after);
     }
     if (!mounted) return;
@@ -873,6 +923,28 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
                       onPressed: () => setState(() => _audio = null),
                     ),
             ),
+          // Фотография к заявке.
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                if (_photo != null)
+                  photoThumb(context, app, _photo!.fileName,
+                      onRemove: () => setState(() => _photo = null))
+                else
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: const Text('Фото'),
+                    onPressed: _pickPhoto,
+                  ),
+                if (_photo != null) ...[
+                  const SizedBox(width: 12),
+                  Text('${(_photo!.sizeBytes / 1024).toStringAsFixed(0)} КБ · нажмите для просмотра',
+                      style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ],
+            ),
+          ),
           const Divider(height: 24),
           if (!_isNew) ...[
             _section('Статус'),

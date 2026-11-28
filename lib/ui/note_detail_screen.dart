@@ -14,6 +14,7 @@ import '../services/voice_commands.dart';
 import '../state/app_state.dart';
 import 'note_edit_screen.dart';
 import 'phone_text.dart';
+import 'photo_view.dart';
 import 'stt_helper.dart';
 
 /// Карточка заявки (ТЗ 4.3): все поля, смена статуса, закрепление,
@@ -281,6 +282,13 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
               subtitle: note.audio!.transcript != null
                   ? Text('Расшифровка: ${note.audio!.transcript}')
                   : null,
+            ),
+          ],
+          if (note.photo != null) ...[
+            const Divider(height: 24),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: photoThumb(context, app, note.photo!.fileName, size: 180),
             ),
           ],
           const Divider(height: 24),

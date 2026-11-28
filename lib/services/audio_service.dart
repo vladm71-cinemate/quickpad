@@ -92,10 +92,15 @@ class AudioService {
   }
 
   /// Загрузить файл на хост. Возвращает размер в байтах или null при ошибке.
-  Future<int?> upload(String host, int port, RecordedAudio audio) async {
+  Future<int?> upload(String host, int port, RecordedAudio audio) =>
+      uploadFile(host, port, audio.fileName, File(audio.path));
+
+  /// Загрузить произвольный файл (например, фото к заявке).
+  Future<int?> uploadFile(
+      String host, int port, String fileName, File file) async {
     try {
-      final Uri uri = Uri.parse('http://$host:$port/audio/${audio.fileName}');
-      final List<int> bytes = await File(audio.path).readAsBytes();
+      final Uri uri = Uri.parse('http://$host:$port/audio/$fileName');
+      final List<int> bytes = await file.readAsBytes();
       final http.Response res = await http
           .post(uri, body: bytes, headers: {'content-type': 'application/octet-stream'})
           .timeout(const Duration(seconds: 30));
