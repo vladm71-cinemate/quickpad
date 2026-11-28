@@ -14,7 +14,6 @@ import '../models/note.dart';
 import '../models/user.dart';
 import '../services/audio_service.dart';
 import '../state/app_state.dart';
-import 'stt_helper.dart';
 
 /// Аргументы экрана редактирования.
 class NoteEditArgs {
@@ -112,17 +111,26 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       setState(() => _dictating = false);
       return;
     }
-    if (!app.stt.isSupported) {
-      _toast('На Windows используйте системную диктовку: Win+H в поле текста');
-      return;
-    }
-    // Ленивая инициализация: разрешение на микрофон запросится здесь.
-    if (!app.stt.isAvailable && !await app.stt.init()) {
-      // Системного распознавателя нет (например, приложение Google отключено).
-      // Делаем то же, что делает диктовка всегда: открываем клавиатуру — её
-      // кнопка 🎤 работает независимо и вводит текст прямо в поле.
-      if (mounted) _openKeyboardDictation(app);
-      return;
+    if (app.stt.isSupported) {
+      // Ленивая инициализация: разрешение на микрофон запросится здесь.
+      if (!app.stt.isAvailable) {
+        await app.stt.init();
+        // Нет системного распознавателя — предложим встроенную автономную
+        // модель (один раз ~23 МБ): работает без Google и без интернета.
+        if (!app.stt.isAvailable && app.stt.needsModel) {
+          final bool ok = await _downloadSttModel(app);
+          if (!ok) return;
+          await app.stt.init();
+        }
+      }
+      if (!app.stt.isAvailable) {
+        // Движок отказался стартовать — тихо открываем клавиатуру:
+        // её кнопка 🎤 работает всегда и вводит текст прямо в поле.
+        _textFocus.requestFocus();
+        unawaited(
+            SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+        return;
+      }
     }
     setState(() => _dictating = true);
     final bool ok = await app.stt.start(
@@ -136,26 +144,97 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     if (!ok && mounted) setState(() => _dictating = false);
   }
 
-  /// Фолбэк диктовки: фокус в поле текста + клавиатура + подсказка про её 🎤.
-  void _openKeyboardDictation(AppState app) {
-    _textFocus.requestFocus();
-    SystemChannels.textInput.invokeMethod<void>('TextInput.show');
-    showDialog<void>(
-      context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        icon: const Icon(Icons.keyboard_voice, size: 40),
-        title: const Text('Диктовка через клавиатуру'),
-        content: const Text(
-            'Клавиатура уже открыта — нажмите кнопку 🎤 (микрофон) НА КЛАВИАТУРЕ '
-            'и говорите: текст появится в поле заявки.\n\n'
-            'Это то же распознавание, что работает у вас в других приложениях, — '
-            'оно встроено в клавиатуру и не зависит от приложения «Google».'),
-        actions: [
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
-        ],
-      ),
+  /// Расшифровка готовой записи автономным движком (пост-обработка).
+  /// Если модели нет — предлагает скачать её один раз (~23 МБ).
+  Future<void> _transcribeRecording(
+      AppState app, String wavPath, AudioAttachment att) async {
+    if (!app.stt.isAvailable) {
+      await app.stt.init();
+      if (!app.stt.isAvailable && app.stt.needsModel) {
+        final bool ok = await _downloadSttModel(app);
+        if (!ok) {
+          _toast('Аудио сохранено. Расшифровка появится после скачивания '
+              'модели распознавания (кнопка «Диктовка»).');
+          return;
+        }
+        await app.stt.init();
+      }
+    }
+    if (!app.stt.usingOffline) return; // автономный движок не активен
+    _toast('Расшифровываю запись…');
+    final String? text = await app.stt.offline.transcribeWav(wavPath);
+    final String t = (text ?? '').trim();
+    if (t.isEmpty) {
+      _toast('Речь не распознана (тишина или неразборчиво)');
+      return;
+    }
+    att.transcript = t;
+    if (_textCtl.text.trim().isEmpty) {
+      _textCtl.text = t;
+      _textCtl.selection = TextSelection.collapsed(offset: t.length);
+    }
+  }
+
+  /// Диалог загрузки модели распознавания с прогрессом. true = модель готова.
+  Future<bool> _downloadSttModel(AppState app) async {
+    final ValueNotifier<double> progress = ValueNotifier<double>(0);
+    String? error;
+    bool finished = false;
+    final Future<String?> future = app.stt.downloadModel(
+      onProgress: (int received, int total) {
+        if (total > 0) progress.value = received / total;
+      },
     );
+    unawaited(future.then((String? e) {
+      error = e;
+      finished = true;
+    }).catchError((Object e) {
+      error = '$e';
+      finished = true;
+    }));
+
+    final bool? result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        Timer? timer;
+        return StatefulBuilder(
+          builder: (BuildContext ctx, void Function(void Function()) setDlg) {
+            timer ??= Timer.periodic(const Duration(milliseconds: 300), (_) {
+              if (finished) {
+                timer?.cancel();
+                if (Navigator.of(ctx).canPop()) {
+                  Navigator.of(ctx).pop(error == null);
+                }
+              }
+            });
+            return AlertDialog(
+              title: const Text('Распознавание речи'),
+              content: ValueListenableBuilder<double>(
+                valueListenable: progress,
+                builder: (BuildContext ctx, double v, _) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Скачиваем встроенное распознавание речи '
+                        '(~23 МБ, один раз). Дальше диктовка работает '
+                        'без интернета и без Google.'),
+                    const SizedBox(height: 16),
+                    LinearProgressIndicator(value: v == 0 ? null : v),
+                    const SizedBox(height: 8),
+                    Text('${(v * 100).toStringAsFixed(0)}%'),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (result != true) {
+      if (error != null) _toast('Не удалось скачать модель: $error');
+      return false;
+    }
+    return true;
   }
 
   Future<void> _toggleRecording() async {
@@ -184,13 +263,11 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           _textCtl.selection =
               TextSelection.collapsed(offset: _textCtl.text.length);
         }
-      } else if (app.ls.hybridEnabled &&
-          app.ls.autoTranscribe &&
-          !app.stt.isAvailable) {
-        // На этом устройстве нет системного распознавателя — текст можно
-        // надиктовать кнопкой 🎤 на клавиатуре (поле текста уже в форме).
-        _toast('Аудио сохранено. Текст надиктуйте кнопкой 🎤 на клавиатуре — '
-            'поле текста ниже.');
+      }
+      // Нет живой расшифровки — попробуем расшифровать запись
+      // встроенным автономным движком (модель ~23 МБ скачивается один раз).
+      if (transcript.isEmpty && app.ls.autoTranscribe && app.stt.isSupported) {
+        await _transcribeRecording(app, rec.path, att);
       }
       setState(() => _audio = att);
     } else {

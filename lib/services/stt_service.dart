@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 
+import 'offline_stt.dart';
+
 /// Диктовка в текст (ТЗ 4.1): распознавание речи.
 ///
 /// Android — через speech_to_text. Два режима:
@@ -22,41 +24,82 @@ import 'package:speech_to_text/speech_to_text.dart';
 /// 'permission', 'permission_permanent', 'no_recognizer', 'error:…'.
 class SttService {
   final SpeechToText _stt = SpeechToText();
-  bool _available = false;
+  final OfflineSttService _offline = OfflineSttService();
+  bool _available = false; // системный распознаватель
+  bool _offlineActive = false; // встроенный автономный движок
 
   /// Причина, по которой распознавание недоступно ('' — всё в порядке).
   String lastError = '';
 
-  bool get isListening => _stt.isListening || _sessionActive;
-  bool get isSupported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-  bool get isAvailable => isSupported && _available;
+  OfflineSttService get offline => _offline;
+
+  bool get isListening => _stt.isListening || _sessionActive || _offline.isDictating;
+
+  /// Диктовка поддерживается везде: где нет системного распознавателя,
+  /// работает встроенный автономный (модель скачивается один раз, ~23 МБ).
+  /// Windows/Linux — системная диктовка (Win+H), но не встроенная: нет
+  /// собранных библиотек sherpa-onnx под десктоп в пакете.
+  bool get isSupported => !kIsWeb;
+
+  /// Можно ли диктовать прямо сейчас (системный или встроенный движок).
+  bool get isAvailable => _available || _offlineActive;
+
+  /// Идёт ли распознавание через встроенный автономный движок.
+  bool get usingOffline => !_available && _offlineActive;
+
+  /// Нужно скачать модель (системного распознавателя нет, модели нет,
+  /// платформа поддерживает встроенный движок).
+  bool get needsModel =>
+      !_available && !_offlineActive && _offline.platformOk;
+
+  /// Скачана ли автономная модель.
+  Future<bool> modelReady() => _offline.modelReady();
+
+  /// Скачать модель (~23 МБ, один раз). null = успех, иначе текст ошибки.
+  Future<String?> downloadModel({void Function(int received, int total)? onProgress}) =>
+      _offline.downloadModel(onProgress: onProgress);
 
   /// Запросить разрешение и инициализировать движок. Безопасно вызывать
-  /// повторно после отказа.
+  /// повторно после отказа. Сначала пробуем системный распознаватель,
+  /// затем — встроенный автономный (если модель уже скачана).
   Future<bool> init() async {
-    if (!isSupported) return false;
-    PermissionStatus mic;
-    try {
-      mic = await Permission.microphone.request();
-    } catch (_) {
-      mic = PermissionStatus.denied;
+    if (kIsWeb) return false;
+    // 1) Системный распознаватель (только мобильные).
+    if (Platform.isAndroid || Platform.isIOS) {
+      PermissionStatus mic;
+      try {
+        mic = await Permission.microphone.request();
+      } catch (_) {
+        mic = PermissionStatus.denied;
+      }
+      if (!mic.isGranted) {
+        lastError = mic.isPermanentlyDenied ? 'permission_permanent' : 'permission';
+        // Разрешения нет — но проверим офлайн-движок ниже (ему оно тоже нужно).
+      } else {
+        try {
+          _available = await _stt.initialize(
+            onError: (error) => lastError = 'error: ${error.errorMsg}',
+          );
+        } catch (_) {
+          _available = false;
+        }
+        if (_available) {
+          lastError = '';
+          return true;
+        }
+      }
     }
-    if (!mic.isGranted) {
-      lastError = mic.isPermanentlyDenied ? 'permission_permanent' : 'permission';
-      return false;
+    // 2) Автономный движок (модель уже скачана).
+    if (await _offline.init()) {
+      _offlineActive = true;
+      lastError = '';
+      return true;
     }
-    try {
-      _available = await _stt.initialize(
-        onError: (error) => lastError = 'error: ${error.errorMsg}',
-      );
-    } catch (_) {
-      _available = false;
+    if (_available) return true;
+    if (lastError.isEmpty || lastError == 'no_recognizer') {
+      lastError = 'no_recognizer'; // UI предложит скачать модель
     }
-    if (!_available && lastError.isEmpty) {
-      lastError = 'no_recognizer';
-    }
-    if (_available) lastError = '';
-    return _available;
+    return false;
   }
 
   /// Открыть системные настройки приложения (когда разрешение запрещено навсегда).
@@ -79,6 +122,10 @@ class SttService {
     bool continuous = false,
   }) async {
     if (!isAvailable) return false;
+    // Автономный движок (нет системного распознавателя).
+    if (!_available && _offlineActive) {
+      return _offline.startDictation(onResult: onResult);
+    }
     if (continuous) {
       _sessionActive = true;
       _committed = '';
@@ -197,9 +244,12 @@ class SttService {
 
   Future<void> stop() async {
     _sessionActive = false;
-    if (!isSupported) return;
+    if (kIsWeb) return;
     try {
       await _stt.stop();
     } catch (_) {}
+    if (_offlineActive) {
+      await _offline.stopDictation();
+    }
   }
 }

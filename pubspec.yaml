@@ -30,6 +30,8 @@ dependencies:
 
   # Голос и аудио
   speech_to_text: ^7.0.0
+  sherpa_onnx: ^2.0.3 # автономное распознавание речи (без Google/интернета)
+  archive: ^3.6.1 # распаковка модели распознавания (tar.bz2)
   record: ^6.0.0
   audioplayers: ^6.0.0
   permission_handler: ^11.3.1

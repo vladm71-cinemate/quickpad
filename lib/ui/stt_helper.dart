@@ -37,9 +37,9 @@ Future<void> showSttError(BuildContext context, SttService stt) async {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           duration: Duration(seconds: 6),
           content: Text('На телефоне нет службы распознавания речи. '
-              'Но вы можете диктовать кнопкой микрофона на КЛАВИАТУРЕ — '
-              'она работает: поставьте курсор в текст и нажмите её. '
-              'Либо включите/обновите приложение «Google».')));
+              'В редакторе заявки кнопка «Диктовка» сама предложит один раз '
+              'скачать встроенное распознавание (~23 МБ) — дальше оно работает '
+              'без интернета и без Google.')));
       break;
     default:
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
