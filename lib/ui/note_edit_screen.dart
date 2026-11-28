@@ -126,8 +126,10 @@ class _NoteEditScreenState extends State<NoteEditScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.paused || !mounted) return;
     if (_dictating) {
-      unawaited(context.read<AppState>().stt.stop());
+      final AppState app = context.read<AppState>();
+      unawaited(app.stt.stop());
       setState(() => _dictating = false);
+      _applyNumbersToText(app);
     }
     if (_recording) {
       unawaited(_toggleRecording());
@@ -141,6 +143,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
     if (_dictating) {
       await app.stt.stop();
       setState(() => _dictating = false);
+      _applyNumbersToText(app); // конвертация — один раз, в конце
       return;
     }
     if (app.stt.isSupported) {
@@ -175,12 +178,13 @@ class _NoteEditScreenState extends State<NoteEditScreen>
       localeId: app.ls.sttLocale,
       continuous: true, // не отключается на паузах: перезапускается само
       onResult: (String text, bool isFinal) {
-        // Настройка «Числа цифрами»: «тридцать килограмм» → «30 килограмм»,
-        // телефоны — слитно. Голосовые команды конвертер не затрагивает.
-        final String t =
-            app.ls.numbersToDigits ? numberWordsToDigits(text) : text;
-        _textCtl.text = t;
-        _textCtl.selection = TextSelection.collapsed(offset: t.length);
+        // ВАЖНО: «числа цифрами» применяем только в КОНЦЕ диктовки
+        // (_applyNumbersToText), а не к каждому промежуточному результату.
+        // Пауза посреди номера телефона фиксирует фрагмент, и преждевременная
+        // конвертация («восемь девятьсот двенадцать» → «8 912») навсегда
+        // ломала склейку остатка номера — получалась каша из цифр и слов.
+        _textCtl.text = text;
+        _textCtl.selection = TextSelection.collapsed(offset: text.length);
       },
       onStatus: (String status) {
         if (!mounted) return;
@@ -189,12 +193,14 @@ class _NoteEditScreenState extends State<NoteEditScreen>
               'автономный (без интернета)');
         } else if (status.startsWith('error')) {
           setState(() => _dictating = false);
+          _applyNumbersToText(app);
           _toast(status.length > 6
               ? 'Диктовка остановлена: ${status.substring(6)}'
               : 'Распознаватель не выдаёт текст. Проверьте: Настройки → '
                   'Голосовой ввод → Проверка распознавания');
         } else if (status == 'done') {
           setState(() => _dictating = false);
+          _applyNumbersToText(app);
         }
       },
     );
@@ -205,6 +211,18 @@ class _NoteEditScreenState extends State<NoteEditScreen>
           : app.stt.lastError;
       if (err.isNotEmpty) _toast('Диктовка не началась: $err');
     }
+  }
+
+  /// Настройка «Числа цифрами»: конвертирует числительные в тексте заявки
+  /// ОДИН раз, когда диктовка завершилась (стоп / конец / ошибка / сворачивание).
+  void _applyNumbersToText(AppState app) {
+    if (!app.ls.numbersToDigits) return;
+    final String t = _textCtl.text;
+    if (t.trim().isEmpty) return;
+    final String converted = numberWordsToDigits(t);
+    if (converted == t) return;
+    _textCtl.text = converted;
+    _textCtl.selection = TextSelection.collapsed(offset: converted.length);
   }
 
   /// Расшифровка готовой записи автономным движком (пост-обработка).
