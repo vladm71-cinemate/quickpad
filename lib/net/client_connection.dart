@@ -203,6 +203,11 @@ class ClientConnection extends ChangeNotifier {
         cache.applyAuditEntries(msg['audit'] as List? ?? []);
         onDataChanged?.call();
         break;
+      case MsgType.noteDeleted:
+        cache.removeNote(msg['noteId'] as String? ?? '');
+        cache.applyAuditEntries(msg['audit'] as List? ?? []);
+        onDataChanged?.call();
+        break;
       case MsgType.users:
         cache.applyUsers(msg['users'] as List? ?? []);
         onDataChanged?.call();

@@ -14,6 +14,7 @@ class MsgType {
   static const String ping = 'ping';
   static const String noteCreate = 'note_create';
   static const String notePatch = 'note_patch';
+  static const String noteDelete = 'note_delete';
   static const String pinSet = 'pin_set';
   static const String pinsOrder = 'pins_order';
   static const String contactUpsert = 'contact_upsert';
@@ -28,6 +29,7 @@ class MsgType {
   static const String welcome = 'welcome';
   static const String snapshot = 'snapshot';
   static const String noteUpsert = 'note_upsert';
+  static const String noteDeleted = 'note_deleted';
   static const String users = 'users';
   static const String presence = 'presence';
   static const String pinUpsert = 'pin_upsert';
@@ -74,6 +76,12 @@ class ClientMsg {
         'noteId': noteId,
         'patch': patch,
         'baseVersion': baseVersion,
+        'clientTime': DateTime.now().toUtc().toIso8601String(),
+      };
+
+  static Map<String, dynamic> noteDelete(String noteId) => {
+        'type': MsgType.noteDelete,
+        'noteId': noteId,
         'clientTime': DateTime.now().toUtc().toIso8601String(),
       };
 

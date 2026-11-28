@@ -302,6 +302,31 @@ class HostDatabase {
     } catch (_) {}
   }
 
+  /// Удаление заявки целиком (очистка архива и т.п.).
+  /// Файлы вложений (аудио, фото) удаляются с диска, закрепления чистятся.
+  HostOpResult deleteNote(String noteId,
+      {required String userId, required String deviceId}) {
+    final Note? note = notes.remove(noteId);
+    if (note == null) return HostOpResult();
+    final AudioAttachment? a = note.audio;
+    if (a != null) _deleteAudioFile(a.fileName);
+    for (final PhotoAttachment p in note.photos) {
+      _deleteAudioFile(p.fileName);
+    }
+    pins.removeWhere((String key, Pin p) => p.noteId == noteId);
+    final List<AuditEntry> entries = [];
+    if (settings.auditEnabled) {
+      final String short = note.text.length > 60
+          ? '${note.text.substring(0, 60)}…'
+          : note.text;
+      entries.add(_audit(noteId, userId, deviceId, AuditType.noteDeleted,
+          details: 'удалена заявка «$short»'));
+    }
+    saveNotes();
+    savePins();
+    return HostOpResult(note: note, audit: entries);
+  }
+
   // ---------- Закрепления (персональные) ----------
 
   HostOpResult setPin(String userId, String noteId, bool pinned, {required String deviceId}) {

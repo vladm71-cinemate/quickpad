@@ -62,6 +62,7 @@ enum AuditType {
   escalation('escalation', 'Требует внимания'),
   reminderFired('reminder_fired', 'Напоминание'),
   audioDeleted('audio_deleted', 'Удаление аудио'),
+  noteDeleted('note_deleted', 'Удаление заявки'),
   contactChange('contact_change', 'Контакты'),
   userChange('user_change', 'Пользователи'),
   conflict('conflict', 'Конфликт синхронизации');

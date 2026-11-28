@@ -102,6 +102,8 @@ class _AuditScreenState extends State<AuditScreen> {
         return Icons.alarm;
       case AuditType.audioDeleted:
         return Icons.mic_off_outlined;
+      case AuditType.noteDeleted:
+        return Icons.delete_outline;
       case AuditType.contactChange:
         return Icons.contacts_outlined;
       case AuditType.userChange:

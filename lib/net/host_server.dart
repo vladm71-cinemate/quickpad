@@ -276,6 +276,18 @@ class HostServer {
         );
         _broadcastNoteResult(r, actorId: session.userId);
         break;
+      case MsgType.noteDelete:
+        if (!sessionReady(session)) return;
+        final HostOpResult r = db.deleteNote(msg['noteId'] as String,
+            userId: session.userId, deviceId: session.deviceId);
+        if (r.note != null) {
+          broadcast({
+            'type': MsgType.noteDeleted,
+            'noteId': msg['noteId'] as String,
+            'audit': _auditJson(r.audit),
+          });
+        }
+        break;
       case MsgType.pinSet:
         if (!sessionReady(session)) return;
         final String noteId = msg['noteId'] as String;
@@ -553,6 +565,19 @@ class HostServer {
     final HostOpResult r = db.patchNote(noteId, patch,
         baseVersion: baseVersion, userId: userId, deviceId: 'host');
     _broadcastNoteResult(r, actorId: userId);
+  }
+
+  /// Удаление заявки на самом хосте.
+  void localDeleteNote(String noteId, {required String userId}) {
+    final HostOpResult r =
+        db.deleteNote(noteId, userId: userId, deviceId: 'host');
+    if (r.note != null) {
+      broadcast({
+        'type': MsgType.noteDeleted,
+        'noteId': noteId,
+        'audit': _auditJson(r.audit),
+      });
+    }
   }
 
   /// Закрепление/открепление пользователем хоста.

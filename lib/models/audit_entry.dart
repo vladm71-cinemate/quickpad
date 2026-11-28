@@ -79,6 +79,8 @@ class AuditEntry {
         return 'Сработало напоминание (${details ?? ''})';
       case AuditType.audioDeleted:
         return 'Аудио удалено автоматически (${details ?? ''})';
+      case AuditType.noteDeleted:
+        return '$who удалил(а) заявку (${details ?? ''})';
       case AuditType.contactChange:
         return '$who: контакт — ${details ?? ''}';
       case AuditType.userChange:

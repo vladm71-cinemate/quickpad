@@ -1,9 +1,9 @@
 import 'dart:async';
+import 'dart:io' show Platform, exit;
 
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
-import 'dart:io' show Platform;
 
 import '../state/settings_controller.dart';
 
@@ -90,7 +90,8 @@ class TrayService with WindowListener, TrayListener {
       // Сворачиваем в трей: хост продолжает принимать подключения.
       await windowManager.hide();
     } else {
-      await windowManager.destroy();
+      // Трей выключен — «закрыть» означает полный выход.
+      await _quit();
     }
   }
 
@@ -115,9 +116,26 @@ class TrayService with WindowListener, TrayListener {
         await windowManager.focus();
         break;
       case 'exit':
-        await windowManager.setPreventClose(false);
-        await windowManager.destroy();
+        await _quit();
         break;
     }
+  }
+
+  /// Полный выход: снимаем перехват закрытия, убираем значок трея,
+  /// уничтожаем окно. Если процесс всё равно висит (открытые сокеты
+  /// хоста, таймеры, нативные плагины) — через 900 мс завершаем его
+  /// принудительно. Задержка даёт время сбросить отложенные записи
+  /// настроек/базы (дебаунс 800 мс).
+  Future<void> _quit() async {
+    try {
+      await windowManager.setPreventClose(false);
+    } catch (_) {}
+    try {
+      await trayManager.destroy();
+    } catch (_) {}
+    try {
+      await windowManager.destroy();
+    } catch (_) {}
+    Timer(const Duration(milliseconds: 900), () => exit(0));
   }
 }

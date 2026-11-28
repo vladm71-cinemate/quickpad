@@ -123,6 +123,11 @@ class LocalCache {
     saveNotes();
   }
 
+  /// Удаление заявки (хост прислал note_deleted).
+  void removeNote(String noteId) {
+    if (notes.remove(noteId) != null) saveNotes();
+  }
+
   void applyUsers(List<dynamic> list) {
     // Хост присылает ПОЛНЫЙ авторитетный список — заменяем целиком,
     // иначе удалённые на хосте пользователи оставались бы на клиенте.

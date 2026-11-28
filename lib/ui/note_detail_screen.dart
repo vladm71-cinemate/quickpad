@@ -140,6 +140,30 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
     if (warning != null) _toast(warning);
   }
 
+  /// Удаление заявки: с подтверждением, на всех устройствах сразу.
+  Future<void> _deleteNote(Note note) async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Удалить заявку?'),
+        content: const Text('Заявка и её вложения (аудио, фото) будут '
+            'удалены на хосте и на всех устройствах. Восстановить нельзя.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Удалить')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await context.read<AppState>().deleteNote(note);
+    if (mounted) Navigator.of(context).pop();
+  }
+
   Future<void> _call(Note note) async {
     final AppState app = context.read<AppState>();
     final Contact? c = note.contactId == null
@@ -209,6 +233,11 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
             icon: const Icon(Icons.print_outlined),
             tooltip: 'Печать заявки',
             onPressed: () => PrintService.printNote(note, app),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Удалить заявку',
+            onPressed: () => _deleteNote(note),
           ),
           IconButton(
             icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined),

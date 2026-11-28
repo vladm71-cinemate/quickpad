@@ -650,6 +650,19 @@ class AppState extends ChangeNotifier {
     await updateNote(note, after);
   }
 
+  /// Удаление заявки целиком (очистка архива и т.п.).
+  /// На хосте удаляются также файлы вложений; всем клиентам уходит событие.
+  Future<void> deleteNote(Note note) async {
+    if (isHost) {
+      _server?.localDeleteNote(note.id, userId: currentUser?.id ?? 'host');
+    } else {
+      _client?.sendOp(ClientMsg.noteDelete(note.id));
+      _cache?.removeNote(note.id); // оптимистично
+    }
+    syncWidget();
+    notifyListeners();
+  }
+
   // ---------- Закрепления (персональные) ----------
 
   bool isPinned(String noteId) {

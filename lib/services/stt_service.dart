@@ -45,7 +45,7 @@ class SttService {
   bool get isAvailable => _available || _offlineActive;
 
   /// Идёт ли распознавание через встроенный автономный движок.
-  bool get usingOffline => !_available && _offlineActive;
+  bool get usingOffline => _offlineActive;
 
   /// Нужно скачать модель (системного распознавателя нет, модели нет,
   /// платформа поддерживает встроенный движок).
@@ -60,11 +60,11 @@ class SttService {
       _offline.downloadModel(onProgress: onProgress);
 
   /// Запросить разрешение и инициализировать движок. Безопасно вызывать
-  /// повторно после отказа. Сначала пробуем системный распознаватель,
-  /// затем — встроенный автономный (если модель уже скачана).
+  /// повторно после отказа. ПРЕДПОЧТИТЕЛЕН встроенный автономный движок
+  /// (если модель скачана): он одинаково работает на любых телефонах,
+  /// без Google и без интернета. Системный — запасной вариант.
   Future<bool> init() async {
     if (kIsWeb) return false;
-    // 1) Системный распознаватель (только мобильные).
     if (Platform.isAndroid || Platform.isIOS) {
       PermissionStatus mic;
       try {
@@ -74,30 +74,36 @@ class SttService {
       }
       if (!mic.isGranted) {
         lastError = mic.isPermanentlyDenied ? 'permission_permanent' : 'permission';
-        // Разрешения нет — но проверим офлайн-движок ниже (ему оно тоже нужно).
-      } else {
-        try {
-          _available = await _stt.initialize(
-            onError: (error) => lastError = 'error: ${error.errorMsg}',
-          );
-        } catch (_) {
-          _available = false;
-        }
-        if (_available) {
-          lastError = '';
-          return true;
-        }
+        return false; // без микрофона не работает ни один движок
       }
+      // 1) Встроенный автономный движок (модель уже скачана).
+      if (await _offline.init()) {
+        _offlineActive = true;
+        lastError = '';
+        return true;
+      }
+      // 2) Системный распознаватель — запасной вариант.
+      try {
+        _available = await _stt.initialize(
+          onError: (error) => lastError = 'error: ${error.errorMsg}',
+        );
+      } catch (_) {
+        _available = false;
+      }
+      if (_available) {
+        lastError = '';
+        return true;
+      }
+      if (lastError.isEmpty) lastError = 'no_recognizer'; // UI предложит модель
+      return false;
     }
-    // 2) Автономный движок (модель уже скачана).
     if (await _offline.init()) {
       _offlineActive = true;
       lastError = '';
       return true;
     }
-    if (_available) return true;
     if (lastError.isEmpty || lastError == 'no_recognizer') {
-      lastError = 'no_recognizer'; // UI предложит скачать модель
+      lastError = 'no_recognizer';
     }
     return false;
   }
@@ -122,9 +128,13 @@ class SttService {
     bool continuous = false,
   }) async {
     if (!isAvailable) return false;
-    // Автономный движок (нет системного распознавателя).
-    if (!_available && _offlineActive) {
-      return _offline.startDictation(onResult: onResult);
+    // Встроенный автономный движок — основной, когда модель скачана:
+    // одинаковое поведение на любом телефоне, без Google и интернета.
+    if (_offlineActive) {
+      return _offline.startDictation(
+        onResult: onResult,
+        onError: (String e) => onStatus?.call('error:$e'),
+      );
     }
     if (continuous) {
       _sessionActive = true;

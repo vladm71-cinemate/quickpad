@@ -182,16 +182,24 @@ class _NoteEditScreenState extends State<NoteEditScreen>
         if (status == 'offline') {
           _toast('Системный распознаватель молчит — включил встроенный '
               'автономный (без интернета)');
-        } else if (status == 'error') {
+        } else if (status.startsWith('error')) {
           setState(() => _dictating = false);
-          _toast('Распознаватель не выдаёт текст. Попробуйте скачать '
-              'автономную модель: Настройки → Голосовой ввод');
+          _toast(status.length > 6
+              ? 'Диктовка остановлена: ${status.substring(6)}'
+              : 'Распознаватель не выдаёт текст. Проверьте: Настройки → '
+                  'Голосовой ввод → Проверка распознавания');
         } else if (status == 'done') {
           setState(() => _dictating = false);
         }
       },
     );
-    if (!ok && mounted) setState(() => _dictating = false);
+    if (!ok && mounted) {
+      setState(() => _dictating = false);
+      final String err = app.stt.offline.lastError.isNotEmpty
+          ? app.stt.offline.lastError
+          : app.stt.lastError;
+      if (err.isNotEmpty) _toast('Диктовка не началась: $err');
+    }
   }
 
   /// Расшифровка готовой записи автономным движком (пост-обработка).
@@ -236,7 +244,12 @@ class _NoteEditScreenState extends State<NoteEditScreen>
     bool finished = false;
     final Future<String?> future = app.stt.downloadModel(
       onProgress: (int received, int total) {
-        if (total > 0) progress.value = received / total;
+        // total == -1 — стадия распаковки: показываем «бегущий» индикатор.
+        if (total == -1) {
+          progress.value = -1;
+        } else if (total > 0) {
+          progress.value = received / total;
+        }
       },
     );
     unawaited(future.then((String? e) {
@@ -273,9 +286,11 @@ class _NoteEditScreenState extends State<NoteEditScreen>
                         '(~23 МБ, один раз). Дальше диктовка работает '
                         'без интернета и без Google.'),
                     const SizedBox(height: 16),
-                    LinearProgressIndicator(value: v == 0 ? null : v),
+                    LinearProgressIndicator(value: v <= 0 ? null : v),
                     const SizedBox(height: 8),
-                    Text('${(v * 100).toStringAsFixed(0)}%'),
+                    Text(v < 0
+                        ? 'Распаковка модели…'
+                        : '${(v * 100).toStringAsFixed(0)}%'),
                   ],
                 ),
               ),

@@ -197,6 +197,38 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
+  /// Очистка архива: удаляет все заявки со статусами «Выполнена»/«Отклонена»
+  /// (на хосте удаляются и файлы вложений, всем устройствам уходит событие).
+  Future<void> _clearArchive(AppState app) async {
+    final List<Note> archived = app.listNotes(archive: true);
+    if (archived.isEmpty) {
+      _toast('Архив пуст');
+      return;
+    }
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Очистить архив?'),
+        content: Text('Будет удалено заявок: ${archived.length}. '
+            'Вложения (аудио, фото) удалятся с хоста. Восстановить нельзя.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Отмена')),
+          FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Удалить всё')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    for (final Note n in archived) {
+      await app.deleteNote(n);
+    }
+    if (mounted) _toast('Архив очищен: удалено ${archived.length}');
+  }
+
   // ---------- UI ----------
 
   @override
@@ -244,6 +276,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 case 'stats':
                   await Navigator.of(context).pushNamed('/stats');
                   break;
+                case 'clearArchive':
+                  await _clearArchive(app);
+                  break;
               }
             },
             itemBuilder: (BuildContext ctx) => [
@@ -263,6 +298,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
+              // В режиме архива — очистка архива от ненужных заявок.
+              if (_archive)
+                const PopupMenuItem<String>(
+                  value: 'clearArchive',
+                  child: ListTile(
+                    leading: Icon(Icons.delete_sweep_outlined,
+                        color: Colors.redAccent),
+                    title: Text('Очистить архив'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               // Статистика — при включённой настройке; работникам скрыта.
               if (app.ls.statsEnabled && (app.currentUser?.isManager ?? true))
                 const PopupMenuItem<String>(

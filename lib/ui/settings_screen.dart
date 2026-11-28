@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../models/settings.dart';
@@ -20,30 +21,84 @@ class SettingsScreen extends StatelessWidget {
 
   /// Проверка распознавания речи: какой движок доступен, скачана ли
   /// автономная модель, какая ошибка была последней. Для диагностики.
+  /// Проверка распознавания речи: пошаговая диагностика — разрешение,
+  /// файлы модели, движок, микрофон (реальный поток 2 секунды).
   Future<void> _checkStt(BuildContext context, AppState app) async {
-    final bool ok = await app.stt.init();
-    final bool model = await app.stt.modelReady();
-    final String engine = app.stt.usingOffline
-        ? 'встроенный автономный (офлайн)'
-        : ok
-            ? 'системный распознаватель'
-            : 'нет';
-    final String err = app.stt.lastError.isEmpty ? '—' : app.stt.lastError;
-    if (!context.mounted) return;
+    final List<String> lines = <String>[];
     await showDialog<void>(
       context: context,
-      builder: (BuildContext ctx) => AlertDialog(
-        title: const Text('Проверка распознавания'),
-        content: Text('Движок: $engine\n'
-            'Автономная модель: ${model ? 'скачана' : 'не скачана'}\n'
-            'Ошибка: $err\n\n'
-            'Если движка нет — нажмите «Диктовка» в заявке, приложение '
-            'предложит скачать модель (~23 МБ, один раз).'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Понятно')),
-        ],
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setDlg) {
+          if (lines.isEmpty) {
+            // Запускаем проверку один раз при открытии диалога.
+            () async {
+              void add(String s) {
+                lines.add(s);
+                if (ctx.mounted) setDlg(() {});
+              }
+
+              // 1) Разрешение на микрофон.
+              final PermissionStatus mic = await Permission.microphone.status;
+              add(mic.isGranted
+                  ? '✅ Разрешение на микрофон: есть'
+                  : '❌ Разрешение на микрофон: НЕТ ($mic)');
+              if (!mic.isGranted) {
+                final PermissionStatus req = await Permission.microphone.request();
+                add(req.isGranted
+                    ? '✅ Разрешение выдано после запроса'
+                    : '❌ Разрешение не выдано — включите в настройках телефона');
+              }
+
+              // 2) Файлы автономной модели.
+              final Map<String, int> files = await app.stt.offline.modelFilesInfo();
+              final bool modelOk =
+                  files.values.every((int size) => size > 0);
+              if (modelOk) {
+                final int total = files.values.fold(0, (a, b) => a + b);
+                add('✅ Автономная модель: скачана '
+                    '(${(total / 1048576).toStringAsFixed(1)} МБ)');
+              } else {
+                add('❌ Автономная модель: НЕ скачана или повреждена');
+                for (final MapEntry<String, int> e in files.entries) {
+                  if (e.value == 0) add('   · нет файла ${e.key}');
+                }
+              }
+
+              // 3) Движок распознавания.
+              final bool ok = await app.stt.init();
+              add(ok
+                  ? (app.stt.usingOffline
+                      ? '✅ Движок: встроенный автономный (офлайн)'
+                      : '✅ Движок: системный распознаватель')
+                  : '❌ Движок не запустился: ${app.stt.lastError}');
+
+              // 4) Микрофонный поток (реальные 2 секунды).
+              add('⏳ Тест микрофона: слушаем 2 секунды…');
+              final int bytes = await app.stt.offline.micTest(seconds: 2);
+              lines.removeLast();
+              add(bytes > 0
+                  ? '✅ Микрофон: передаёт звук (${(bytes / 1024).toStringAsFixed(0)} КБ за 2 с)'
+                  : '❌ Микрофон: ТИШИНА — 0 байт. Закройте другие '
+                      'приложения с микрофоном и проверьте разрешение.');
+
+              if (!modelOk) {
+                add('\nРешение: нажмите «Диктовка» в заявке — приложение '
+                    'предложит скачать модель (~23 МБ, один раз).');
+              }
+            }();
+          }
+          return AlertDialog(
+            title: const Text('Проверка распознавания'),
+            content: SingleChildScrollView(
+              child: Text(lines.isEmpty ? '⏳ Проверяем…' : lines.join('\n')),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Закрыть')),
+            ],
+          );
+        },
       ),
     );
   }
