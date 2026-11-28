@@ -463,6 +463,8 @@ class AppState extends ChangeNotifier {
       await prefs.setString(_kUserName, currentUser!.name);
       currentUser!.online = true;
       currentUser!.lastSeen = DateTime.now().toUtc();
+      // Пользователь самого хоста — всегда руководитель (видит все заявки).
+      currentUser!.role = 'manager';
       _db!.saveUsers();
       _server?.hostUserId = id;
     } else {
@@ -482,6 +484,7 @@ class AppState extends ChangeNotifier {
       _db!.helloUser(userId: user.id, userName: user.name, deviceId: device.deviceId);
       _server?.hostUserId = user.id;
       user.online = true;
+      user.role = 'manager'; // хост — всегда руководитель
       _db!.saveUsers();
     } else {
       await _startClientStack(); // переподключение под новым профилем

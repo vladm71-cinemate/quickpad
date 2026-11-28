@@ -9,15 +9,16 @@ class AppUser {
     this.lastSeen,
     this.online = false,
     DateTime? createdAt,
-    this.role = 'worker',
+    this.role = 'manager',
   })  : deviceIds = deviceIds ?? <String>[],
         createdAt = createdAt ?? DateTime.now().toUtc();
 
   final String id;
   String name;
 
-  /// Роль: 'manager' (руководитель) или 'worker' (работник).
-  /// Назначается на хосте в настройках пользователей.
+  /// Роль: 'manager' (руководитель, видит все заявки — ПО УМОЛЧАНИЮ)
+  /// или 'worker' (работник, видит только свои). Переключается на хосте
+  /// в Настройки → 6.10 → «Роли пользователей».
   String role;
   bool get isManager => role == 'manager';
 
@@ -48,7 +49,7 @@ class AppUser {
         lastSeen: j['lastSeen'] != null ? DateTime.tryParse(j['lastSeen'] as String) : null,
         online: j['online'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now().toUtc(),
-        role: j['role'] as String? ?? 'worker',
+        role: j['role'] as String? ?? 'manager',
       );
 
   AppUser copy() => AppUser.fromJson(toJson());
