@@ -151,6 +151,10 @@ class LocalSettings {
   bool quickLine = true; // Быстрое создание в одну строку
   bool voiceButton = true; // Голосовая кнопка на главном
 
+  // Windows (хост на ПК)
+  bool trayEnabled = true; // Сворачивать в трей при закрытии окна
+  bool autoStartWindows = false; // Запускать вместе с Windows
+
   /// Установить булеву настройку по ключу.
   void setFlag(String key, bool v) {
     _boolSetters()[key]?.call(this, v);
@@ -214,6 +218,8 @@ class LocalSettings {
         'widgetEnabled': (s) => s.widgetEnabled,
         'quickLine': (s) => s.quickLine,
         'voiceButton': (s) => s.voiceButton,
+        'trayEnabled': (s) => s.trayEnabled,
+        'autoStartWindows': (s) => s.autoStartWindows,
       };
 
   Map<String, void Function(LocalSettings, bool)> _boolSetters() => {
@@ -256,6 +262,8 @@ class LocalSettings {
         'widgetEnabled': (s, v) => s.widgetEnabled = v,
         'quickLine': (s, v) => s.quickLine = v,
         'voiceButton': (s, v) => s.voiceButton = v,
+        'trayEnabled': (s, v) => s.trayEnabled = v,
+        'autoStartWindows': (s, v) => s.autoStartWindows = v,
       };
 
   Map<String, dynamic> toFullJson() => {

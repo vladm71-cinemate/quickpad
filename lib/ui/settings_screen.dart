@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/settings.dart';
 import '../net/discovery.dart';
+import '../services/tray_service.dart';
 import '../state/app_state.dart';
 import '../state/settings_controller.dart';
 
@@ -345,6 +348,25 @@ class SettingsScreen extends StatelessWidget {
               await app.background.requestIgnoreBatteryOptimizations();
             },
           ),
+
+          // ---------- Windows: трей и автозапуск (ПК-хост) ----------
+          if (!kIsWeb && Platform.isWindows) ...[
+            header('Компьютер (Windows)'),
+            flag('trayEnabled', 'Сворачивать в трей при закрытии',
+                'Крестик прячет окно — хост продолжает работать, телефоны '
+                'не теряют связь. Значок — рядом с часами.'),
+            SwitchListTile(
+              title: const Text('Запускать вместе с Windows'),
+              subtitle: const Text(
+                  'Приложение стартует само при включении компьютера '
+                  'и сразу сворачивается в трей.'),
+              value: app.ls.autoStartWindows,
+              onChanged: (bool v) {
+                unawaited(sc.setFlag('autoStartWindows', v));
+                unawaited(TrayService.instance.setAutoStart(v));
+              },
+            ),
+          ],
 
           // ---------- 6.9 Резервное копирование (хост) ----------
           header('6.9 Резервное копирование'),
