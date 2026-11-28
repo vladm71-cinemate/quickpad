@@ -82,8 +82,20 @@ class _QuickPadAppState extends State<QuickPadApp> with WidgetsBindingObserver {
       // с кнопкой «Копировать». Пузыри чата исключены
       // (SelectionContainer.disabled): там долгое нажатие открывает меню
       // сообщения (ответить / скопировать / удалить).
-      builder: (BuildContext context, Widget? child) =>
-          SelectionArea(child: child ?? const SizedBox.shrink()),
+      //
+      // ВАЖНО: SelectionArea обёрнута в собственный Overlay. Меню
+      // выделения и «ручки» вставляются в Overlay ВЫШЕ SelectionArea,
+      // а навигаторский Overlay находится НИЖЕ — без своего Overlay
+      // панель «Копировать / Выделить всё» и меню по правой кнопке
+      // молча не появлялись.
+      builder: (BuildContext context, Widget? child) => Overlay(
+        initialEntries: <OverlayEntry>[
+          OverlayEntry(
+            builder: (BuildContext context) =>
+                SelectionArea(child: child ?? const SizedBox.shrink()),
+          ),
+        ],
+      ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

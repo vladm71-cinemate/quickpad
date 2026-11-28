@@ -211,10 +211,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return Text(text, maxLines: 2, overflow: TextOverflow.ellipsis);
     }
     final ColorScheme cs = Theme.of(context).colorScheme;
-    return RichText(
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      text: TextSpan(
+    // Text.rich (а не голый RichText) — участвует в глобальном выделении.
+    return Text.rich(
+      TextSpan(
         style: Theme.of(context).textTheme.bodyMedium,
         children: [
           TextSpan(text: text.substring(0, pos)),
@@ -228,6 +227,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
           TextSpan(text: text.substring(pos + q.length)),
         ],
       ),
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }

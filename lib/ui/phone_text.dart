@@ -88,6 +88,9 @@ class _PhoneTextState extends State<PhoneText> {
     if (spans.isEmpty) {
       return Text(widget.text, style: base);
     }
-    return RichText(text: TextSpan(children: spans, style: base));
+    // Text.rich (а не голый RichText): виджет Text сам регистрируется
+    // в SelectionArea — текст заявки можно выделить и скопировать,
+    // а номера остаются кликабельными.
+    return Text.rich(TextSpan(children: spans, style: base));
   }
 }
