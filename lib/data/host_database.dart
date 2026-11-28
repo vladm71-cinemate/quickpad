@@ -178,6 +178,17 @@ class HostDatabase {
 
   String userName(String id) => users[id]?.name ?? (id.isEmpty ? '—' : id);
 
+  /// Смена роли пользователя (только на хосте): 'manager' | 'worker'.
+  void setUserRole(String userId, String role, {required String actorId}) {
+    final AppUser? u = users[userId];
+    if (u == null || u.role == role) return;
+    u.role = role;
+    _audit(null, actorId, 'host', AuditType.userChange,
+        details: 'роль «${u.name}»: ${role == 'manager' ? 'руководитель' : 'работник'}');
+    saveUsers();
+    broadcast?.call({'type': 'users', 'users': users.values.map((e) => e.toJson()).toList()});
+  }
+
   // ---------- Заявки ----------
 
   /// Создание заявки. Автор и время — от хоста.

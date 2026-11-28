@@ -573,6 +573,21 @@ class SettingsScreen extends StatelessWidget {
           flag('userBinding', 'Привязка пользователя к устройству'),
           flag('showOnlineUsers', 'Показывать список онлайн-пользователей'),
           flag('allowUserSwitch', 'Разрешить смену пользователя на устройстве'),
+          if (app.isHost) ...[
+            ListTile(
+              title: const Text('Роли пользователей'),
+              subtitle: const Text(
+                  'руководитель видит все заявки и статистику, работник — свои'),
+            ),
+            for (final u in app.users)
+              SwitchListTile(
+                title: Text(u.name),
+                subtitle: Text(u.isManager ? 'Руководитель' : 'Работник'),
+                value: u.isManager,
+                onChanged: (bool v) =>
+                    app.setUserRole(u, v ? 'manager' : 'worker'),
+              ),
+          ],
 
           // ---------- 6.11 Виджет и быстрые действия ----------
           header('6.11 Виджет и быстрые действия (Android)'),

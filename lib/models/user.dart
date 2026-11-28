@@ -9,11 +9,17 @@ class AppUser {
     this.lastSeen,
     this.online = false,
     DateTime? createdAt,
+    this.role = 'worker',
   })  : deviceIds = deviceIds ?? <String>[],
         createdAt = createdAt ?? DateTime.now().toUtc();
 
   final String id;
   String name;
+
+  /// Роль: 'manager' (руководитель) или 'worker' (работник).
+  /// Назначается на хосте в настройках пользователей.
+  String role;
+  bool get isManager => role == 'manager';
 
   /// Устройства, с которых входил пользователь.
   final List<String> deviceIds;
@@ -32,6 +38,7 @@ class AppUser {
         'lastSeen': lastSeen?.toIso8601String(),
         'online': online,
         'createdAt': createdAt.toIso8601String(),
+        'role': role,
       };
 
   factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
@@ -41,6 +48,7 @@ class AppUser {
         lastSeen: j['lastSeen'] != null ? DateTime.tryParse(j['lastSeen'] as String) : null,
         online: j['online'] as bool? ?? false,
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now().toUtc(),
+        role: j['role'] as String? ?? 'worker',
       );
 
   AppUser copy() => AppUser.fromJson(toJson());

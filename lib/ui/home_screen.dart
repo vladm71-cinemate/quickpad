@@ -202,8 +202,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final AppState app = context.watch<AppState>();
+    // Работник видит только свои заявки; руководитель — все.
+    final bool effectiveMine =
+        _mineOnly || (app.currentUser != null && !app.currentUser!.isManager);
     final List<Note> notes = app.listNotes(
-        mineOnly: _mineOnly, query: _query, status: _statusFilter, archive: _archive);
+        mineOnly: effectiveMine, query: _query, status: _statusFilter, archive: _archive);
 
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
@@ -260,7 +263,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
-              if (app.ls.statsEnabled)
+              // Статистика — при включённой настройке; работникам скрыта.
+              if (app.ls.statsEnabled && (app.currentUser?.isManager ?? true))
                 const PopupMenuItem<String>(
                   value: 'stats',
                   child: ListTile(

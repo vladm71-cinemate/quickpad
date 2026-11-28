@@ -735,6 +735,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Смена роли пользователя: руководитель видит все заявки и статистику,
+  /// работник — только свои (фильтр на главном экране).
+  Future<void> setUserRole(AppUser user, String role) async {
+    if (!isHost || _db == null) return;
+    _db!.setUserRole(user.id, role, actorId: currentUser?.id ?? 'host');
+    notifyListeners();
+  }
+
   // ---------- Хостовые настройки (только на хосте, ТЗ 6) ----------
 
   Future<void> saveHostSettings(HostSettings s) async {
