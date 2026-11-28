@@ -124,10 +124,14 @@ class LocalCache {
   }
 
   void applyUsers(List<dynamic> list) {
-    for (final Object? e in list) {
-      final AppUser u = AppUser.fromJson((e as Map).cast<String, dynamic>());
-      users[u.id] = u;
-    }
+    // Хост присылает ПОЛНЫЙ авторитетный список — заменяем целиком,
+    // иначе удалённые на хосте пользователи оставались бы на клиенте.
+    users
+      ..clear()
+      ..addEntries(list.map((e) {
+        final AppUser u = AppUser.fromJson((e as Map).cast<String, dynamic>());
+        return MapEntry(u.id, u);
+      }));
     saveUsers();
   }
 

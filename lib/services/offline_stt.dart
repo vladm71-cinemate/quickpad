@@ -40,6 +40,14 @@ class OfflineSttService {
   String _committed = '';
   void Function(String text, bool isFinal)? _onResult;
 
+  // Гибридная запись: одновременно с распознаванием пишем WAV-файл.
+  IOSink? _wavSink;
+  String? _wavPath;
+  int _wavBytes = 0;
+
+  /// Причина последней ошибки ('' — всё в порядке). Для диагностики.
+  String lastError = '';
+
   bool get engineReady => _recognizer != null;
   bool get isDictating => _dictating;
 
@@ -138,7 +146,11 @@ class OfflineSttService {
               joiner: '${p}joiner.int8.onnx',
             ),
             tokens: '${p}tokens.txt',
-            modelType: 'zipformer2',
+            // Пустая строка = автоопределение из метаданных модели.
+            // ВАЖНО: у этой русской модели тип НЕ zipformer2 — с явным типом
+            // конструктор падает с ошибкой метаданных (проверено тестом
+            // на реальных test_wavs из архива модели).
+            modelType: '',
             numThreads: 2,
             provider: 'cpu',
             debug: false,
@@ -147,17 +159,37 @@ class OfflineSttService {
         ),
       );
       _recognizer = recognizer;
+      // Самопроверка: прогоняем тишину через движок. Если нативная
+      // библиотека не загрузилась или модель не подошла — упадём здесь
+      // с понятной ошибкой, а не будем молча «диктовать в никуда».
+      final sherpa.OnlineStream test = recognizer.createStream();
+      try {
+        test.acceptWaveform(samples: Float32List(8000), sampleRate: 16000);
+        while (recognizer.isReady(test)) {
+          recognizer.decode(test);
+        }
+        recognizer.getResult(test);
+      } finally {
+        test.free();
+      }
+      lastError = '';
       return true;
-    } catch (_) {
+    } catch (e) {
       _recognizer = null;
+      lastError = '$e';
       return false;
     }
   }
 
   /// Начать потоковую диктовку. [onResult] получает ПОЛНЫЙ накопленный текст
   /// (isFinal=false — промежуточный, true — завершён окончательно).
+  ///
+  /// Если передан [saveWavPath], одновременно пишет микрофон в WAV-файл
+  /// (16 кГц моно PCM) — гибридный режим «аудио + текст» без системного
+  /// распознавателя.
   Future<bool> startDictation({
     required void Function(String text, bool isFinal) onResult,
+    String? saveWavPath,
   }) async {
     if (_dictating) return true;
     if (!await init()) return false;
@@ -166,6 +198,19 @@ class OfflineSttService {
       final PermissionStatus mic = await Permission.microphone.request();
       if (!mic.isGranted) return false;
     } catch (_) {}
+
+    // Параллельная запись в WAV (гибридный режим).
+    if (saveWavPath != null) {
+      try {
+        final File f = File(saveWavPath);
+        _wavSink = f.openWrite();
+        _wavSink!.add(_wavHeader(0)); // заглушка, размер впишем при стопе
+        _wavPath = saveWavPath;
+        _wavBytes = 0;
+      } catch (e) {
+        lastError = 'wav: $e';
+      }
+    }
 
     final sherpa.OnlineStream stream = recognizer.createStream();
     _stream = stream;
@@ -205,6 +250,13 @@ class OfflineSttService {
       _micSub = audio.listen(
         (Uint8List data) {
           if (!_dictating) return;
+          // Параллельная запись в файл (сырые PCM-байты как есть).
+          if (_wavSink != null) {
+            try {
+              _wavSink!.add(data);
+              _wavBytes += data.length;
+            } catch (_) {}
+          }
           // PCM16 little-endian → float32 [-1, 1].
           final Int16List pcm = Int16List.view(
               data.buffer, data.offsetInBytes, data.length ~/ 2);
@@ -215,20 +267,29 @@ class OfflineSttService {
           stream.acceptWaveform(samples: samples, sampleRate: 16000);
           pump();
         },
-        onError: (_) {},
+        onError: (Object e) {
+          // Ошибку микрофона/движка не прячем: видна в диагностике.
+          lastError = 'микрофон: $e';
+        },
       );
       return true;
-    } catch (_) {
+    } catch (e) {
+      lastError = '$e';
       _dictating = false;
       _stream = null;
       stream.free();
+      await _closeWav();
       return false;
     }
   }
 
   /// Остановить диктовку и дораспознать «хвост» — итог придёт
   /// в onResult с isFinal=true.
-  Future<String> stopDictation() async {
+  Future<String> stopDictation() async => (await stopDictationFull()).text;
+
+  /// Как [stopDictation], но возвращает ещё и путь к WAV-файлу
+  /// (если диктовка шла с параллельной записью).
+  Future<({String text, String? wavPath})> stopDictationFull() async {
     _dictating = false;
     try {
       await _micSub?.cancel();
@@ -254,10 +315,58 @@ class OfflineSttService {
         stream.free();
       } catch (_) {}
     }
+    await _closeWav();
     final String result = _committed;
     _onResult?.call(result, true);
     _onResult = null;
-    return result;
+    return (text: result, wavPath: _wavPath);
+  }
+
+  /// Закрыть WAV-файл и вписать реальный размер данных в заголовок.
+  Future<void> _closeWav() async {
+    final IOSink? sink = _wavSink;
+    _wavSink = null;
+    if (sink == null) return;
+    try {
+      await sink.flush();
+      await sink.close();
+      final String? p = _wavPath;
+      if (p != null && _wavBytes > 0) {
+        final RandomAccessFile raf =
+            await File(p).open(mode: FileMode.writeOnlyAppend);
+        try {
+          await raf.setPosition(0);
+          await raf.writeFrom(_wavHeader(_wavBytes));
+        } finally {
+          await raf.close();
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Заголовок WAV: PCM16, моно, 16 кГц.
+  static Uint8List _wavHeader(int dataBytes) {
+    final ByteData b = ByteData(44);
+    void tag(int off, String s) {
+      for (int i = 0; i < 4; i++) {
+        b.setUint8(off + i, s.codeUnitAt(i));
+      }
+    }
+
+    tag(0, 'RIFF');
+    b.setUint32(4, 36 + dataBytes, Endian.little);
+    tag(8, 'WAVE');
+    tag(12, 'fmt ');
+    b.setUint32(16, 16, Endian.little); // размер fmt-чанка
+    b.setUint16(20, 1, Endian.little); // PCM
+    b.setUint16(22, 1, Endian.little); // моно
+    b.setUint32(24, 16000, Endian.little); // частота
+    b.setUint32(28, 32000, Endian.little); // байт/сек
+    b.setUint16(32, 2, Endian.little); // байт на сэмпл-фрейм
+    b.setUint16(34, 16, Endian.little); // битность
+    tag(36, 'data');
+    b.setUint32(40, dataBytes, Endian.little);
+    return b.buffer.asUint8List();
   }
 
   /// Расшифровать готовый WAV-файл (16 кГц моно) — для гибридного режима.

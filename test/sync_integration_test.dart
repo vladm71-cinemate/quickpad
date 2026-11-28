@@ -7,6 +7,7 @@ import 'package:quickpad/data/local_cache.dart';
 import 'package:quickpad/models/chat_message.dart';
 import 'package:quickpad/models/enums.dart';
 import 'package:quickpad/models/note.dart';
+import 'package:quickpad/models/user.dart';
 import 'package:quickpad/net/client_connection.dart';
 import 'package:quickpad/net/host_server.dart';
 import 'package:quickpad/net/protocol.dart';
@@ -121,4 +122,24 @@ void main() {
       }
     }
   }, timeout: const Timeout(Duration(seconds: 60)));
+
+  test('applyUsers заменяет список целиком: удалённый на хосте исчезает',
+      () async {
+    final Directory tmp = await Directory.systemTemp.createTemp('qp_users');
+    final LocalCache cache =
+        LocalCache(dataDir: Directory('${tmp.path}/client'));
+    await cache.load();
+
+    cache.applyUsers([
+      AppUser(id: 'u1', name: 'Иван').toJson(),
+      AppUser(id: 'u2', name: 'Мария').toJson(),
+    ]);
+    expect(cache.users.length, 2);
+
+    // Хост удалил Марию и разослал полный список без неё.
+    cache.applyUsers([AppUser(id: 'u1', name: 'Иван').toJson()]);
+    expect(cache.users.length, 1);
+    expect(cache.users.containsKey('u2'), isFalse);
+    expect(cache.users['u1']?.name, 'Иван');
+  });
 }

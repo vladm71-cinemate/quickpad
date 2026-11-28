@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants.dart';
+import '../core/ids.dart';
 import '../core/timefmt.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
@@ -58,6 +61,8 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   bool _playingAudio = false;
   DateTime? _recStarted;
   String _recTranscript = ''; // буфер расшифровки гибридного режима
+  bool _hybridWav = false; // идёт запись через автономный движок (мик+WAV)
+  String? _hybridWavPath;
   bool _saving = false;
 
   bool get _isNew => _original == null;
@@ -161,6 +166,10 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       }
     }
     if (!app.stt.usingOffline) return; // автономный движок не активен
+    if (!wavPath.toLowerCase().endsWith('.wav')) {
+      // m4a автономный движок не читает — нужен WAV (гибрид пишет его сам).
+      return;
+    }
     _toast('Расшифровываю запись…');
     final String? text = await app.stt.offline.transcribeWav(wavPath);
     final String t = (text ?? '').trim();
@@ -240,6 +249,10 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   Future<void> _toggleRecording() async {
     final AppState app = context.read<AppState>();
     if (_recording) {
+      if (_hybridWav) {
+        await _stopHybridWav(app);
+        return;
+      }
       final RecordedAudio? rec = await app.audio.stopRecording();
       // Остановить параллельную расшифровку (гибридный режим).
       await app.stt.stop();
@@ -271,6 +284,15 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       }
       setState(() => _audio = att);
     } else {
+      // Автономный движок активен: один микрофонный поток делится между
+      // распознаванием и WAV-файлом (двойной захват микрофона невозможен).
+      if (app.ls.hybridEnabled && app.ls.autoTranscribe && app.stt.isSupported) {
+        if (!app.stt.isAvailable) await app.stt.init();
+        if (app.stt.usingOffline) {
+          await _startHybridWav(app);
+          return;
+        }
+      }
       final bool ok = await app.audio.startRecording();
       if (!ok) {
         _toast('Нет доступа к микрофону');
@@ -285,7 +307,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       // Если микрофон не делится на этом устройстве — останется просто аудио.
       if (app.ls.hybridEnabled && app.ls.autoTranscribe && app.stt.isSupported) {
         if (!app.stt.isAvailable) await app.stt.init();
-        if (app.stt.isAvailable && _recording) {
+        if (app.stt.isAvailable && _recording && !app.stt.usingOffline) {
           unawaited(app.stt.start(
             localeId: app.ls.sttLocale,
             continuous: true,
@@ -297,6 +319,70 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         }
       }
     }
+  }
+
+  /// Старт гибридной записи через автономный движок: текст появляется
+  /// вживую, голос пишется в WAV-файл.
+  Future<void> _startHybridWav(AppState app) async {
+    final Directory dir = await getTemporaryDirectory();
+    final String fileName = '${newId()}.wav';
+    final String path = '${dir.path}${Platform.pathSeparator}$fileName';
+    final bool ok = await app.stt.offline.startDictation(
+      onResult: (String text, bool isFinal) {
+        _recTranscript = text;
+        if (_recording && mounted) setState(() {});
+      },
+      saveWavPath: path,
+    );
+    if (!ok) {
+      _toast(app.stt.offline.lastError.isNotEmpty
+          ? 'Запись не началась: ${app.stt.offline.lastError}'
+          : 'Нет доступа к микрофону');
+      return;
+    }
+    setState(() {
+      _recording = true;
+      _hybridWav = true;
+      _hybridWavPath = path;
+      _recStarted = DateTime.now();
+      _recTranscript = '';
+    });
+  }
+
+  /// Стоп гибридной записи: финализируем WAV и прикрепляем с расшифровкой.
+  Future<void> _stopHybridWav(AppState app) async {
+    final ({String text, String? wavPath}) res =
+        await app.stt.offline.stopDictationFull();
+    final String path = res.wavPath ?? _hybridWavPath ?? '';
+    _hybridWav = false;
+    _hybridWavPath = null;
+    setState(() => _recording = false);
+    final File f = File(path);
+    if (path.isEmpty || !await f.exists() || await f.length() < 2000) {
+      _toast('Запись не удалась');
+      return;
+    }
+    final RecordedAudio rec = RecordedAudio(
+      path: path,
+      fileName: path.split(Platform.pathSeparator).last,
+      durationSec:
+          DateTime.now().difference(_recStarted ?? DateTime.now()).inSeconds,
+    );
+    final AudioAttachment? att = await app.attachAudio(rec);
+    if (att == null) {
+      _toast('Не удалось передать аудио на хост');
+      return;
+    }
+    final String transcript =
+        res.text.trim().isNotEmpty ? res.text.trim() : _recTranscript.trim();
+    if (transcript.isNotEmpty) {
+      att.transcript = transcript;
+      if (_textCtl.text.trim().isEmpty) {
+        _textCtl.text = transcript; // текст можно править
+        _textCtl.selection = TextSelection.collapsed(offset: transcript.length);
+      }
+    }
+    setState(() => _audio = att);
   }
 
   Future<void> _toggleAudioPlay() async {
