@@ -174,6 +174,7 @@ class SttService {
   ) async {
     bool onDevice = true; // сначала пробуем on-device (без Google и интернета)
     int failures = 0;
+    int emptyFragments = 0; // фрагменты, в которых движок не распознал ни слова
     while (_sessionActive && isAvailable) {
       final String locale = localeId.replaceAll('-', '_');
       String fragment = '';
@@ -208,7 +209,10 @@ class SttService {
           }
           failures++;
           if (failures >= 3) {
+            // Системный распознаватель не заводится (нет сервиса Google
+            // и т.п.) — переключаемся на встроенный автономный движок.
             _sessionActive = false;
+            await _fallbackToOffline(onResult, onStatus);
             break;
           }
           await Future<void>.delayed(const Duration(milliseconds: 600));
@@ -231,6 +235,18 @@ class SttService {
               _committed.isEmpty ? fragment : '$_committed $fragment';
           onResult(_committed, true);
         }
+        // Движок «прослушал» фрагмент, но не распознал ни слова —
+        // признак сломанного системного распознавателя.
+        if (fragment.trim().isEmpty) {
+          emptyFragments++;
+          if (emptyFragments >= 3) {
+            _sessionActive = false;
+            await _fallbackToOffline(onResult, onStatus);
+            break;
+          }
+        } else {
+          emptyFragments = 0;
+        }
       } catch (_) {
         // Ошибка запуска — попробуем ещё раз после паузы.
       }
@@ -240,6 +256,29 @@ class SttService {
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     onStatus?.call('done');
+  }
+
+  /// Системный распознаватель не завёлся или молчит: переключаемся на
+  /// встроенный автономный движок, если модель скачана.
+  /// true = диктовка продолжается на встроенном движке.
+  Future<bool> _fallbackToOffline(
+    void Function(String text, bool isFinal) onResult,
+    void Function(String status)? onStatus,
+  ) async {
+    try {
+      await _stt.stop();
+    } catch (_) {}
+    if (_offline.platformOk &&
+        await _offline.modelReady() &&
+        await _offline.init()) {
+      _available = false;
+      _offlineActive = true;
+      onStatus?.call('offline');
+      return _offline.startDictation(onResult: onResult);
+    }
+    lastError = 'no_text';
+    onStatus?.call('error');
+    return false;
   }
 
   Future<void> stop() async {

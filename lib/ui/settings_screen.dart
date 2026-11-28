@@ -18,6 +18,36 @@ import '../state/settings_controller.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  /// Проверка распознавания речи: какой движок доступен, скачана ли
+  /// автономная модель, какая ошибка была последней. Для диагностики.
+  Future<void> _checkStt(BuildContext context, AppState app) async {
+    final bool ok = await app.stt.init();
+    final bool model = await app.stt.modelReady();
+    final String engine = app.stt.usingOffline
+        ? 'встроенный автономный (офлайн)'
+        : ok
+            ? 'системный распознаватель'
+            : 'нет';
+    final String err = app.stt.lastError.isEmpty ? '—' : app.stt.lastError;
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('Проверка распознавания'),
+        content: Text('Движок: $engine\n'
+            'Автономная модель: ${model ? 'скачана' : 'не скачана'}\n'
+            'Ошибка: $err\n\n'
+            'Если движка нет — нажмите «Диктовка» в заявке, приложение '
+            'предложит скачать модель (~23 МБ, один раз).'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Понятно')),
+        ],
+      ),
+    );
+  }
+
   /// Редактор шаблонов заявки: список фраз, добавление/правка/удаление.
   Future<void> _editTemplates(
       BuildContext context, SettingsController sc) async {
@@ -325,6 +355,17 @@ class SettingsScreen extends StatelessWidget {
               onChanged: (String? v) {
                 if (v != null) sc.setSttLocale(v);
               },
+            ),
+          ),
+          // Диагностика распознавания: видно, какой движок доступен,
+          // скачана ли автономная модель и какая была последняя ошибка.
+          ListTile(
+            leading: const Icon(Icons.mic_external_on_outlined),
+            title: const Text('Проверка распознавания'),
+            subtitle: const Text('состояние движка, модели и последняя ошибка'),
+            trailing: TextButton(
+              child: const Text('Проверить'),
+              onPressed: () => _checkStt(context, app),
             ),
           ),
 

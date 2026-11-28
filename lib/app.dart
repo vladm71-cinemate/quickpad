@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
@@ -28,7 +30,34 @@ class QuickPadApp extends StatefulWidget {
   State<QuickPadApp> createState() => _QuickPadAppState();
 }
 
-class _QuickPadAppState extends State<QuickPadApp> {
+class _QuickPadAppState extends State<QuickPadApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      // При уходе в фон обязательно отпускаем микрофон: фоновая служба
+      // держит процесс живым, иначе диктовка продолжала бы держать
+      // микрофон бесконечно и голосовой ввод на клавиатуре ломался.
+      // Android и так глушит микрофон фоновым приложениям — распознавание
+      // в фоне всё равно невозможно.
+      try {
+        final AppState app = context.read<AppState>();
+        unawaited(app.stt.stop());
+      } catch (_) {}
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final SettingsController settings = context.watch<SettingsController>();

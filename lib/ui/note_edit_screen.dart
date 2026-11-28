@@ -44,7 +44,8 @@ class NoteEditScreen extends StatefulWidget {
   State<NoteEditScreen> createState() => _NoteEditScreenState();
 }
 
-class _NoteEditScreenState extends State<NoteEditScreen> {
+class _NoteEditScreenState extends State<NoteEditScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _textCtl = TextEditingController();
   final TextEditingController _tagsCtl = TextEditingController();
   final FocusNode _textFocus = FocusNode();
@@ -76,6 +77,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final AppState app = context.read<AppState>();
     final NoteEditArgs? args = widget.args;
     if (args?.noteId != null) {
@@ -108,10 +110,27 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _textCtl.dispose();
     _tagsCtl.dispose();
     _textFocus.dispose();
     super.dispose();
+  }
+
+  /// При сворачивании приложения микрофон обязательно отпускаем:
+  /// Android глушит микрофон фоновым приложениям, а процесс у нас живёт
+  /// (фоновая служба) — иначе запись висела бы «в никуда» и блокировала
+  /// голосовой ввод клавиатуры. Диктовку завершаем, запись — сохраняем.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.paused || !mounted) return;
+    if (_dictating) {
+      unawaited(context.read<AppState>().stt.stop());
+      setState(() => _dictating = false);
+    }
+    if (_recording) {
+      unawaited(_toggleRecording());
+    }
   }
 
   // ---------- Голос ----------
@@ -136,11 +155,17 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
         }
       }
       if (!app.stt.isAvailable) {
-        // Движок отказался стартовать — тихо открываем клавиатуру:
-        // её кнопка 🎤 работает всегда и вводит текст прямо в поле.
+        // Движок отказался стартовать — показываем причину и открываем
+        // клавиатуру: её кнопка 🎤 вводит текст прямо в поле.
         _textFocus.requestFocus();
         unawaited(
             SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+        final String err = app.stt.lastError;
+        _toast(err == 'permission' || err == 'permission_permanent'
+            ? 'Нет разрешения на микрофон (Настройки → Приложения → QuickPad)'
+            : err == 'no_recognizer'
+                ? 'Нет распознавателя: скачайте модель (Настройки → Голосовой ввод)'
+                : 'Распознавание недоступно${err.isEmpty ? '' : ': $err'}');
         return;
       }
     }
@@ -151,6 +176,19 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       onResult: (String text, bool isFinal) {
         _textCtl.text = text;
         _textCtl.selection = TextSelection.collapsed(offset: text.length);
+      },
+      onStatus: (String status) {
+        if (!mounted) return;
+        if (status == 'offline') {
+          _toast('Системный распознаватель молчит — включил встроенный '
+              'автономный (без интернета)');
+        } else if (status == 'error') {
+          setState(() => _dictating = false);
+          _toast('Распознаватель не выдаёт текст. Попробуйте скачать '
+              'автономную модель: Настройки → Голосовой ввод');
+        } else if (status == 'done') {
+          setState(() => _dictating = false);
+        }
       },
     );
     if (!ok && mounted) setState(() => _dictating = false);
