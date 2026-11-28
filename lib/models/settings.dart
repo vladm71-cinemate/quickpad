@@ -151,6 +151,14 @@ class LocalSettings {
   bool quickLine = true; // Быстрое создание в одну строку
   bool voiceButton = true; // Голосовая кнопка на главном
 
+  // Отчёты
+  bool statsEnabled = true; // Экран статистики (сводка за период)
+
+  // Тихие часы: уведомления приходят без звука (например, ночью)
+  bool quietHoursEnabled = false;
+  int quietStart = 20; // час начала (0..23)
+  int quietEnd = 8; // час конца
+
   // Windows (хост на ПК)
   bool trayEnabled = true; // Сворачивать в трей при закрытии окна
   bool autoStartWindows = false; // Запускать вместе с Windows
@@ -172,6 +180,8 @@ class LocalSettings {
     sttLocale = j['sttLocale'] as String? ?? sttLocale;
     workStart = (j['workStart'] as num?)?.toInt() ?? workStart;
     workEnd = (j['workEnd'] as num?)?.toInt() ?? workEnd;
+    quietStart = (j['quietStart'] as num?)?.toInt() ?? quietStart;
+    quietEnd = (j['quietEnd'] as num?)?.toInt() ?? quietEnd;
     for (final e in _boolSetters().entries) {
       final Object? v = j[e.key];
       if (v is bool) e.value(this, v);
@@ -220,6 +230,8 @@ class LocalSettings {
         'voiceButton': (s) => s.voiceButton,
         'trayEnabled': (s) => s.trayEnabled,
         'autoStartWindows': (s) => s.autoStartWindows,
+        'statsEnabled': (s) => s.statsEnabled,
+        'quietHoursEnabled': (s) => s.quietHoursEnabled,
       };
 
   Map<String, void Function(LocalSettings, bool)> _boolSetters() => {
@@ -264,6 +276,8 @@ class LocalSettings {
         'voiceButton': (s, v) => s.voiceButton = v,
         'trayEnabled': (s, v) => s.trayEnabled = v,
         'autoStartWindows': (s, v) => s.autoStartWindows = v,
+        'statsEnabled': (s, v) => s.statsEnabled = v,
+        'quietHoursEnabled': (s, v) => s.quietHoursEnabled = v,
       };
 
   Map<String, dynamic> toFullJson() => {
@@ -273,5 +287,7 @@ class LocalSettings {
         'sttLocale': sttLocale,
         'workStart': workStart,
         'workEnd': workEnd,
+        'quietStart': quietStart,
+        'quietEnd': quietEnd,
       };
 }

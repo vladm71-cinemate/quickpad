@@ -69,4 +69,23 @@ class SettingsController extends ChangeNotifier {
     await _save();
     notifyListeners();
   }
+
+  Future<void> setQuietHours(int start, int end) async {
+    settings.quietStart = start;
+    settings.quietEnd = end;
+    await _save();
+    notifyListeners();
+  }
+
+  // ---------- Шаблоны заявок ----------
+
+  static const String _kTemplates = 'templates';
+
+  /// Заготовки текста заявки (вставляются одним нажатием в редакторе).
+  List<String> get templates => _prefs.getStringList(_kTemplates) ?? <String>[];
+
+  Future<void> setTemplates(List<String> value) async {
+    await _prefs.setStringList(_kTemplates, value);
+    notifyListeners();
+  }
 }

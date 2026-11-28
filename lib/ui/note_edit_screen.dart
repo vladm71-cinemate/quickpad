@@ -18,6 +18,7 @@ import '../models/user.dart';
 import '../services/audio_service.dart';
 import '../services/photo_service.dart';
 import '../state/app_state.dart';
+import '../state/settings_controller.dart';
 import 'photo_view.dart';
 
 /// Аргументы экрана редактирования.
@@ -452,6 +453,39 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       if (mounted) setState(() => _playingAudio = false);
     });
     setState(() => _playingAudio = true);
+  }
+
+  /// Вставка заготовленного текста (шаблоны задаются в настройках).
+  Future<void> _insertTemplate() async {
+    final List<String> templates =
+        context.read<SettingsController>().templates;
+    if (templates.isEmpty) {
+      _toast('Шаблоны задаются в Настройки → Шаблоны заявок');
+      return;
+    }
+    final String? picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (BuildContext ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('Шаблоны заявки',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+            for (final String t in templates)
+              ListTile(title: Text(t), onTap: () => Navigator.pop(ctx, t)),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final String cur = _textCtl.text;
+    final String next =
+        cur.trim().isEmpty ? picked : '${cur.trimRight()}\n$picked';
+    _textCtl.text = next;
+    _textCtl.selection = TextSelection.collapsed(offset: next.length);
+    _textFocus.requestFocus();
   }
 
   /// Выбор контакта с поиском по вхождению (как глобальный поиск):
@@ -892,6 +926,11 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
                       : 'Запись голоса'),
                   onPressed: _toggleRecording,
                 ),
+              ActionChip(
+                avatar: const Icon(Icons.notes, size: 18),
+                label: const Text('Шаблон'),
+                onPressed: _insertTemplate,
+              ),
             ],
           ),
           if (_recording && _recTranscript.isNotEmpty)

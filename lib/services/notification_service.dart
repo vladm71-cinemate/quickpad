@@ -87,11 +87,19 @@ class NotificationService {
         break;
     }
 
-    // Звук: общий + раздельные переключатели + «не беспокоить».
+    // Звук: общий + раздельные переключатели + «не беспокоить» + тихие часы.
     bool sound = s.notifSound && !s.dnd;
     if (kind == NotifyKind.newNote && !s.soundNew) sound = false;
     if ((kind == NotifyKind.reminder || kind == NotifyKind.escalation) && !s.soundReminder) {
       sound = false;
+    }
+    if (sound && s.quietHoursEnabled) {
+      final int h = DateTime.now().hour;
+      // Интервал может переходить через полночь (например, 20 → 8).
+      final bool quiet = s.quietStart <= s.quietEnd
+          ? (h >= s.quietStart && h < s.quietEnd)
+          : (h >= s.quietStart || h < s.quietEnd);
+      if (quiet) sound = false;
     }
     final bool vibration = s.vibration && sound;
 

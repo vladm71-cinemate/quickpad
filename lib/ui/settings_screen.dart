@@ -18,6 +18,93 @@ import '../state/settings_controller.dart';
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
+  /// Редактор шаблонов заявки: список фраз, добавление/правка/удаление.
+  Future<void> _editTemplates(
+      BuildContext context, SettingsController sc) async {
+    final List<String> list = List<String>.from(sc.templates);
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx, void Function(void Function()) setDlg) {
+          Future<void> editOne([int? idx]) async {
+            final TextEditingController ctl = TextEditingController(
+                text: idx != null ? list[idx] : '');
+            final String? v = await showDialog<String>(
+              context: ctx,
+              builder: (BuildContext d) => AlertDialog(
+                title: Text(idx == null ? 'Новый шаблон' : 'Изменить шаблон'),
+                content: TextField(
+                  controller: ctl,
+                  autofocus: true,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      hintText: 'Текст заготовки…',
+                      border: OutlineInputBorder()),
+                ),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(d),
+                      child: const Text('Отмена')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(d, ctl.text.trim()),
+                      child: const Text('Сохранить')),
+                ],
+              ),
+            );
+            if (v == null || v.isEmpty) return;
+            setDlg(() {
+              if (idx == null) {
+                list.add(v);
+              } else {
+                list[idx] = v;
+              }
+            });
+            await sc.setTemplates(list);
+          }
+
+          return AlertDialog(
+            title: const Text('Шаблоны заявок'),
+            content: SizedBox(
+              width: 420,
+              height: 360,
+              child: list.isEmpty
+                  ? const Center(
+                      child: Text('Пока пусто. Добавьте частые формулировки — '
+                          'они появятся в редакторе заявки кнопкой «Шаблон».'))
+                  : ListView.builder(
+                      itemCount: list.length,
+                      itemBuilder: (BuildContext ctx, int i) => ListTile(
+                        dense: true,
+                        title: Text(list[i],
+                            maxLines: 2, overflow: TextOverflow.ellipsis),
+                        onTap: () => editOne(i),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            setDlg(() => list.removeAt(i));
+                            await sc.setTemplates(list);
+                          },
+                        ),
+                      ),
+                    ),
+            ),
+            actions: [
+              TextButton.icon(
+                icon: const Icon(Icons.add),
+                label: const Text('Добавить'),
+                onPressed: () => editOne(),
+              ),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Готово')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   /// Ручной ввод адреса хоста (клиент).
   Future<void> _editHostAddress(BuildContext context, AppState app) async {
     final TextEditingController ctl = TextEditingController(text: app.hostAddress);
@@ -199,6 +286,24 @@ class SettingsScreen extends StatelessWidget {
                     context: context, initialTime: TimeOfDay(hour: s.workEnd, minute: 0));
                 if (to == null) return;
                 sc.setWorkHours(from.hour, to.hour);
+              },
+            ),
+          flag('quietHoursEnabled', 'Тихие часы',
+              'в это время уведомления приходят без звука'),
+          if (s.quietHoursEnabled)
+            ListTile(
+              title: const Text('Тихие часы'),
+              trailing: Text('${s.quietStart}:00–${s.quietEnd}:00'),
+              onTap: () async {
+                final TimeOfDay? from = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay(hour: s.quietStart, minute: 0));
+                if (from == null || !context.mounted) return;
+                final TimeOfDay? to = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay(hour: s.quietEnd, minute: 0));
+                if (to == null) return;
+                sc.setQuietHours(from.hour, to.hour);
               },
             ),
 
@@ -456,6 +561,24 @@ class SettingsScreen extends StatelessWidget {
           flag('widgetEnabled', 'Виджет «Быстрая заметка»'),
           flag('quickLine', 'Быстрое создание в одну строку'),
           flag('voiceButton', 'Голосовая кнопка на главном экране'),
+
+          // ---------- Отчёты ----------
+          header('Отчёты и статистика'),
+          flag('statsEnabled', 'Экран статистики',
+              'сводка за день/неделю/месяц — кнопка в меню списка заявок'),
+
+          // ---------- Шаблоны заявок ----------
+          header('Шаблоны заявок'),
+          ListTile(
+            leading: const Icon(Icons.notes),
+            title: const Text('Заготовки текста заявки'),
+            subtitle: Text(sc.templates.isEmpty
+                ? 'например: «Закупить материалы для…» — вставляются '
+                    'одним нажатием в редакторе заявки'
+                : 'шаблонов: ${sc.templates.length}'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _editTemplates(context, sc),
+          ),
 
           const SizedBox(height: 24),
           ListTile(

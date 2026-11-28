@@ -53,6 +53,9 @@ dependencies:
   device_info_plus: ^11.1.0
   image_picker: ^1.1.2 # фото к заявке: камера/галерея на телефоне
   image: ^4.2.0 # сжатие фото (чистый Dart)
+  printing: ^5.14.3 # печать заявок (PDF)
+  pdf: ^3.11.0 # генерация PDF для печати
+  share_plus: ^10.1.4 # «поделиться» экспортным файлом на телефоне
 
 dev_dependencies:
   flutter_test:
@@ -74,3 +77,5 @@ flutter:
   uses-material-design: true
   assets:
     - assets/app_icon.ico
+    - assets/fonts/DejaVuSans.ttf
+    - assets/fonts/DejaVuSans-Bold.ttf

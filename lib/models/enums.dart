@@ -13,6 +13,9 @@ enum NoteStatus {
   final String wire;
   final String label;
 
+  /// Финальный статус: заявка закрыта (выполнена или отклонена).
+  bool get isFinal => this == NoteStatus.done || this == NoteStatus.rejected;
+
   static NoteStatus fromWire(String? v) =>
       NoteStatus.values.firstWhere((e) => e.wire == v, orElse: () => NoteStatus.fresh);
 }

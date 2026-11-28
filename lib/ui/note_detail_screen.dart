@@ -15,6 +15,7 @@ import '../state/app_state.dart';
 import 'note_edit_screen.dart';
 import 'phone_text.dart';
 import 'photo_view.dart';
+import '../services/print_service.dart';
 import 'stt_helper.dart';
 
 /// Карточка заявки (ТЗ 4.3): все поля, смена статуса, закрепление,
@@ -204,6 +205,11 @@ class _NoteDetailScreenState extends State<NoteDetailScreen> {
       appBar: AppBar(
         title: Text('Заявка · ${note.status.label}'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.print_outlined),
+            tooltip: 'Печать заявки',
+            onPressed: () => PrintService.printNote(note, app),
+          ),
           IconButton(
             icon: Icon(pinned ? Icons.push_pin : Icons.push_pin_outlined),
             tooltip: pinned ? 'Открепить' : 'Закрепить',

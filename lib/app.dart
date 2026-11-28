@@ -15,6 +15,7 @@ import 'ui/note_detail_screen.dart';
 import 'ui/note_edit_screen.dart';
 import 'ui/onboarding_screen.dart';
 import 'ui/settings_screen.dart';
+import 'ui/stats_screen.dart';
 import 'ui/users_screen.dart';
 
 /// Корневой виджет: темы (ТЗ 4.13), локаль, навигация.
@@ -82,6 +83,9 @@ class _QuickPadAppState extends State<QuickPadApp> {
             break;
           case '/settings':
             page = const SettingsScreen();
+            break;
+          case '/stats':
+            page = const StatsScreen();
             break;
           case '/help':
             page = const HelpScreen();

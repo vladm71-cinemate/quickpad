@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,6 +11,8 @@ import '../core/timefmt.dart';
 import '../models/contact.dart';
 import '../models/enums.dart';
 import '../models/note.dart';
+import '../services/export_service.dart';
+import '../services/print_service.dart';
 import '../services/voice_commands.dart';
 import '../state/app_state.dart';
 import 'note_edit_screen.dart';
@@ -31,6 +34,8 @@ class _HomeScreenState extends State<HomeScreen> {
   NoteStatus? _statusFilter;
   Timer? _timer;
   bool _listening = false;
+  final FocusNode _searchFocus = FocusNode();
+  final FocusNode _hotkeyFocus = FocusNode();
 
   @override
   void initState() {
@@ -49,6 +54,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _searchFocus.dispose();
+    _hotkeyFocus.dispose();
     super.dispose();
   }
 
@@ -198,11 +205,72 @@ class _HomeScreenState extends State<HomeScreen> {
     final List<Note> notes = app.listNotes(
         mineOnly: _mineOnly, query: _query, status: _statusFilter, archive: _archive);
 
-    return Scaffold(
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        // Ctrl+N — новая заявка, Ctrl+F — поиск (на ПК; на телефоне бездействует).
+        const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
+            Navigator.of(context).pushNamed('/edit'),
+        const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+            _searchFocus.requestFocus,
+      },
+      child: Focus(
+        autofocus: true,
+        focusNode: _hotkeyFocus,
+        child: Scaffold(
       appBar: AppBar(
         title: Text(_archive ? 'Архив заявок' : kAppName),
         actions: [
           if (app.ls.showConnIndicator) _connIndicator(app),
+          // Печать / экспорт / статистика текущего списка (с учётом фильтров).
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Действия со списком',
+            onSelected: (String v) async {
+              switch (v) {
+                case 'print':
+                  await PrintService.printNotes(notes, app,
+                      title: _archive ? 'Архив заявок' : 'Заявки QuickPad');
+                  break;
+                case 'export':
+                  final String? res = await ExportService.exportCsv(notes, app);
+                  if (context.mounted && res != null) {
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(res)));
+                  }
+                  break;
+                case 'stats':
+                  await Navigator.of(context).pushNamed('/stats');
+                  break;
+              }
+            },
+            itemBuilder: (BuildContext ctx) => [
+              const PopupMenuItem<String>(
+                value: 'print',
+                child: ListTile(
+                  leading: Icon(Icons.print_outlined),
+                  title: Text('Печать списка'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'export',
+                child: ListTile(
+                  leading: Icon(Icons.table_view_outlined),
+                  title: Text('Экспорт в Excel (CSV)'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              if (app.ls.statsEnabled)
+                const PopupMenuItem<String>(
+                  value: 'stats',
+                  child: ListTile(
+                    leading: Icon(Icons.bar_chart),
+                    title: Text('Статистика'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+            ],
+          ),
           IconButton(
             icon: const Icon(Icons.settings),
             tooltip: 'Настройки',
@@ -217,6 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
             child: TextField(
+              focusNode: _searchFocus,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
                 hintText: 'Поиск по всем данным: слово, телефон, автор, тег…',
@@ -293,6 +362,8 @@ class _HomeScreenState extends State<HomeScreen> {
             label: const Text('Заявка'),
           ),
         ],
+      ),
+        ),
       ),
     );
   }

@@ -8,11 +8,13 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   local_notifier
   permission_handler_windows
+  printing
   record_windows
   screen_retriever
   speech_to_text_windows
   tray_manager
   url_launcher_windows
+  share_plus
   window_manager
 )
 
