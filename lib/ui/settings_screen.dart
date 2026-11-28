@@ -321,6 +321,31 @@ class SettingsScreen extends StatelessWidget {
           flag('showConnIndicator', 'Индикатор онлайн/оффлайн'),
           flag('conflictNotify', 'Уведомление о конфликте синхронизации'),
 
+          // ---------- Фон и уведомления (Android) ----------
+          header('Фон и уведомления (телефон)'),
+          SwitchListTile(
+            title: const Text('Держать связь в фоне'),
+            subtitle: const Text(
+                'Уведомления приходят, даже когда приложение закрыто. '
+                'В шторке будет тихое постоянное уведомление.'),
+            value: app.ls.bgKeepAlive,
+            onChanged: (bool v) {
+              unawaited(sc.setFlag('bgKeepAlive', v));
+              unawaited(app.background.setEnabled(v));
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.battery_saver),
+            title: const Text('Разрешить работу в фоне'),
+            subtitle: const Text(
+                'Открывает системную настройку: исключить приложение из '
+                'экономии заряда — иначе Android может рвать связь.'),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () async {
+              await app.background.requestIgnoreBatteryOptimizations();
+            },
+          ),
+
           // ---------- 6.9 Резервное копирование (хост) ----------
           header('6.9 Резервное копирование'),
           hostFlag('Автосохранение базы', hs.backupAuto, (bool v) => hs.backupAuto = v),

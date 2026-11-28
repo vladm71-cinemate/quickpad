@@ -135,6 +135,7 @@ class LocalSettings {
   // 6.8 Синхронизация и оффлайн
   bool offlineMode = true; // Оффлайн-режим (кэш)
   bool autoSync = true; // Автосинхронизация при возврате в сеть
+  bool bgKeepAlive = true; // Держать связь в фоне (уведомления при закрытом окне)
   bool showConnIndicator = true; // Показывать индикатор онлайн/оффлайн
   bool conflictNotify = true; // Уведомление о конфликте синхронизации
 
@@ -204,6 +205,7 @@ class LocalSettings {
         'contactLinkEnabled': (s) => s.contactLinkEnabled,
         'offlineMode': (s) => s.offlineMode,
         'autoSync': (s) => s.autoSync,
+        'bgKeepAlive': (s) => s.bgKeepAlive,
         'showConnIndicator': (s) => s.showConnIndicator,
         'conflictNotify': (s) => s.conflictNotify,
         'userBinding': (s) => s.userBinding,
@@ -245,6 +247,7 @@ class LocalSettings {
         'contactLinkEnabled': (s, v) => s.contactLinkEnabled = v,
         'offlineMode': (s, v) => s.offlineMode = v,
         'autoSync': (s, v) => s.autoSync = v,
+        'bgKeepAlive': (s, v) => s.bgKeepAlive = v,
         'showConnIndicator': (s, v) => s.showConnIndicator = v,
         'conflictNotify': (s, v) => s.conflictNotify = v,
         'userBinding': (s, v) => s.userBinding = v,

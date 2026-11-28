@@ -7,6 +7,10 @@
     <!-- Уведомления (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
+    <!-- Фоновая связь с хостом (уведомления при закрытом приложении) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 
     <!-- Видимость сервиса распознавания речи на Android 11+ (иначе диктовка «недоступна») -->
     <queries>
@@ -17,7 +21,7 @@
 
     <application
         android:label="@string/app_name"
-        android:name="${applicationName}"
+        android:name=".App"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
 
@@ -51,6 +55,12 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/quickadd_widget"/>
         </receiver>
+
+        <!-- Фоновая связь с хостом: уведомления приходят при закрытом окне -->
+        <service
+            android:name=".SyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"/>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -28,6 +28,7 @@ import '../net/host_jobs.dart';
 import '../net/host_server.dart';
 import '../net/protocol.dart';
 import '../services/audio_service.dart';
+import '../services/background_service.dart';
 import '../services/device_info.dart';
 import '../services/notification_service.dart';
 import '../services/stt_service.dart';
@@ -76,6 +77,7 @@ class AppState extends ChangeNotifier {
   final SttService stt = SttService();
   final AudioService audio = AudioService();
   final WidgetService _widget = WidgetService();
+  final BackgroundService background = BackgroundService();
 
   late final Directory baseDir;
   late final DeviceIdentity device;
@@ -315,6 +317,9 @@ class AppState extends ChangeNotifier {
     role = prefs.getString(_kRole) == 'host' ? DeviceRole.host : DeviceRole.client;
 
     await notifications.init();
+    // Фоновая связь на Android: foreground service держит процесс живым,
+    // чтобы уведомления приходили при закрытом окне.
+    unawaited(background.setEnabled(ls.bgKeepAlive));
     // STT инициализируется лениво при первом нажатии кнопки диктовки —
     // разрешение микрофона не запрашиваем при старте приложения.
     unawaited(audio.cleanupTemp());

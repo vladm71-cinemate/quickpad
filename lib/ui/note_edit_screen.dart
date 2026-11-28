@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:provider/provider.dart';
 
@@ -41,6 +42,7 @@ class NoteEditScreen extends StatefulWidget {
 class _NoteEditScreenState extends State<NoteEditScreen> {
   final TextEditingController _textCtl = TextEditingController();
   final TextEditingController _tagsCtl = TextEditingController();
+  final FocusNode _textFocus = FocusNode();
 
   Note? _original;
   NoteStatus _status = NoteStatus.fresh;
@@ -97,6 +99,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
   void dispose() {
     _textCtl.dispose();
     _tagsCtl.dispose();
+    _textFocus.dispose();
     super.dispose();
   }
 
@@ -115,7 +118,10 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
     }
     // Ленивая инициализация: разрешение на микрофон запросится здесь.
     if (!app.stt.isAvailable && !await app.stt.init()) {
-      if (mounted) await showSttError(context, app.stt);
+      // Системного распознавателя нет (например, приложение Google отключено).
+      // Делаем то же, что делает диктовка всегда: открываем клавиатуру — её
+      // кнопка 🎤 работает независимо и вводит текст прямо в поле.
+      if (mounted) _openKeyboardDictation(app);
       return;
     }
     setState(() => _dictating = true);
@@ -128,6 +134,28 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
       },
     );
     if (!ok && mounted) setState(() => _dictating = false);
+  }
+
+  /// Фолбэк диктовки: фокус в поле текста + клавиатура + подсказка про её 🎤.
+  void _openKeyboardDictation(AppState app) {
+    _textFocus.requestFocus();
+    SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        icon: const Icon(Icons.keyboard_voice, size: 40),
+        title: const Text('Диктовка через клавиатуру'),
+        content: const Text(
+            'Клавиатура уже открыта — нажмите кнопку 🎤 (микрофон) НА КЛАВИАТУРЕ '
+            'и говорите: текст появится в поле заявки.\n\n'
+            'Это то же распознавание, что работает у вас в других приложениях, — '
+            'оно встроено в клавиатуру и не зависит от приложения «Google».'),
+        actions: [
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
+        ],
+      ),
+    );
   }
 
   Future<void> _toggleRecording() async {
@@ -156,6 +184,13 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           _textCtl.selection =
               TextSelection.collapsed(offset: _textCtl.text.length);
         }
+      } else if (app.ls.hybridEnabled &&
+          app.ls.autoTranscribe &&
+          !app.stt.isAvailable) {
+        // На этом устройстве нет системного распознавателя — текст можно
+        // надиктовать кнопкой 🎤 на клавиатуре (поле текста уже в форме).
+        _toast('Аудио сохранено. Текст надиктуйте кнопкой 🎤 на клавиатуре — '
+            'поле текста ниже.');
       }
       setState(() => _audio = att);
     } else {
@@ -615,6 +650,7 @@ class _NoteEditScreenState extends State<NoteEditScreen> {
           ),
           TextField(
             controller: _textCtl,
+            focusNode: _textFocus,
             minLines: 3,
             maxLines: 8,
             autofocus: _isNew && (widget.args?.initialText == null),
