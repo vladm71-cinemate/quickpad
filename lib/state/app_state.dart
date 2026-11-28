@@ -174,7 +174,7 @@ class AppState extends ChangeNotifier {
 
   /// Отправить текстовое или голосовое сообщение пользователю [toId].
   Future<ChatMessage> sendChatMessage(String toId,
-      {String text = '', AudioAttachment? audio}) async {
+      {String text = '', AudioAttachment? audio, String? replyToId}) async {
     final AppUser me = currentUser!;
     final ChatMessage m = ChatMessage(
       fromId: me.id,
@@ -182,6 +182,7 @@ class AppState extends ChangeNotifier {
       text: text.trim(),
       audioFileName: audio?.fileName,
       audioDurationSec: audio?.durationSec,
+      replyToId: replyToId,
     );
     if (isHost) {
       _server?.localSendChat(m);

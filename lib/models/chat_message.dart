@@ -13,6 +13,7 @@ class ChatMessage {
     this.text = '',
     this.audioFileName,
     this.audioDurationSec,
+    this.replyToId,
     DateTime? createdAt,
     this.readAt,
   })  : id = id ?? newId(),
@@ -24,6 +25,9 @@ class ChatMessage {
   String text;
   String? audioFileName;
   int? audioDurationSec;
+
+  /// Ответ на сообщение (id исходного) — как «Ответить» в Telegram/WhatsApp.
+  String? replyToId;
   DateTime createdAt;
   DateTime? readAt;
 
@@ -36,6 +40,7 @@ class ChatMessage {
         'text': text,
         'audioFileName': audioFileName,
         'audioDurationSec': audioDurationSec,
+        'replyToId': replyToId,
         'createdAt': createdAt.toIso8601String(),
         'readAt': readAt?.toIso8601String(),
       };
@@ -47,6 +52,7 @@ class ChatMessage {
         text: j['text'] as String? ?? '',
         audioFileName: j['audioFileName'] as String?,
         audioDurationSec: (j['audioDurationSec'] as num?)?.toInt(),
+        replyToId: j['replyToId'] as String?,
         createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '')?.toUtc() ??
             DateTime.now().toUtc(),
         readAt: j['readAt'] == null
