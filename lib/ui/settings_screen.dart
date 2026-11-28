@@ -381,452 +381,558 @@ class SettingsScreen extends StatelessWidget {
       );
     }
 
-    Widget header(String title) => Padding(
-          padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
-          child: Text(title,
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold)),
+    /// Сворачиваемая категория настроек: заголовок с иконкой раскрывает
+    /// карточку. Список длинный, поэтому свёрнуто всё, кроме подключения.
+    Widget section({
+      required IconData icon,
+      required String title,
+      required List<Widget> children,
+      bool initiallyExpanded = false,
+    }) =>
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0.5,
+          child: ExpansionTile(
+            leading: Icon(icon),
+            title: Text(title,
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+            initiallyExpanded: initiallyExpanded,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            children: children,
+          ),
         );
 
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки')),
       body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
           // ---------- Подключение к хосту (только клиент) ----------
-          if (!app.isHost) ...[
-            header('Подключение к хосту'),
-            ListTile(
-              leading: const Icon(Icons.dns_outlined),
-              title: const Text('Адрес хоста'),
-              subtitle: Text(app.hostAddress.isEmpty
-                  ? 'не задан'
-                  : '${app.hostAddress}:${app.hostPort}'),
-              trailing: Text(app.connectionLabel),
-              onTap: () => _editHostAddress(context, app),
-            ),
-            ListTile(
-              leading: const Icon(Icons.wifi_find),
-              title: const Text('Найти хост в сети'),
-              subtitle: const Text('автопоиск по Wi-Fi'),
-              onTap: () => _discoverHosts(context, app),
-            ),
-          ],
-
-          // ---------- 6.1 Общие ----------
-          header('6.1 Общие'),
-          SwitchListTile(
-            title: const Text('Тёмная тема'),
-            value: s.darkTheme,
-            onChanged: (bool v) => sc.setDarkTheme(v),
-          ),
-          flag('notifSound', 'Звук уведомлений'),
-          flag('vibration', 'Вибрация (Android)'),
-          flag('showDaySummary', 'Показывать сводку дня'),
-          ListTile(
-            title: const Text('Язык интерфейса'),
-            trailing: DropdownButton<String>(
-              value: s.language,
-              items: const [
-                DropdownMenuItem(value: 'ru', child: Text('Русский')),
-                DropdownMenuItem(value: 'en', child: Text('English')),
+          if (!app.isHost)
+            section(
+              icon: Icons.dns_outlined,
+              title: 'Подключение к хосту',
+              initiallyExpanded: true,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.dns_outlined),
+                  title: const Text('Адрес хоста'),
+                  subtitle: Text(app.hostAddress.isEmpty
+                      ? 'не задан'
+                      : '${app.hostAddress}:${app.hostPort}'),
+                  trailing: Text(app.connectionLabel),
+                  onTap: () => _editHostAddress(context, app),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.wifi_find),
+                  title: const Text('Найти хост в сети'),
+                  subtitle: const Text('автопоиск по Wi-Fi'),
+                  onTap: () => _discoverHosts(context, app),
+                ),
               ],
-              onChanged: (String? v) {
-                if (v != null) sc.setLanguage(v);
-              },
-            ),
-          ),
-
-          // ---------- 6.2 Уведомления ----------
-          header('6.2 Уведомления'),
-          flag('notifNew', 'Новые заявки'),
-          flag('notifChanges', 'Изменения заявок (уведомлять о каждой правке)'),
-          flag('notifReminders', 'Напоминания'),
-          flag('notifEscalation', '«Требует внимания» (нет реакции на заявку)'),
-          flag('notifChat', 'Личные сообщения'),
-          flag('soundNew', 'Звук для новых заявок'),
-          flag('soundReminder', 'Звук для напоминаний и «Требует внимания»'),
-          flag('dnd', 'Не беспокоить'),
-          flag('workHoursEnabled', 'Рабочие часы для уведомлений'),
-          if (s.workHoursEnabled)
-            ListTile(
-              title: const Text('Интервал рабочих часов'),
-              trailing: Text('${s.workStart}:00–${s.workEnd}:00'),
-              onTap: () async {
-                final TimeOfDay? from = await showTimePicker(
-                    context: context, initialTime: TimeOfDay(hour: s.workStart, minute: 0));
-                if (from == null || !context.mounted) return;
-                final TimeOfDay? to = await showTimePicker(
-                    context: context, initialTime: TimeOfDay(hour: s.workEnd, minute: 0));
-                if (to == null) return;
-                sc.setWorkHours(from.hour, to.hour);
-              },
-            ),
-          flag('quietHoursEnabled', 'Тихие часы',
-              'в это время уведомления приходят без звука'),
-          if (s.quietHoursEnabled)
-            ListTile(
-              title: const Text('Тихие часы'),
-              trailing: Text('${s.quietStart}:00–${s.quietEnd}:00'),
-              onTap: () async {
-                final TimeOfDay? from = await showTimePicker(
-                    context: context,
-                    initialTime: TimeOfDay(hour: s.quietStart, minute: 0));
-                if (from == null || !context.mounted) return;
-                final TimeOfDay? to = await showTimePicker(
-                    context: context,
-                    initialTime: TimeOfDay(hour: s.quietEnd, minute: 0));
-                if (to == null) return;
-                sc.setQuietHours(from.hour, to.hour);
-              },
             ),
 
-          // ---------- 6.3 Голосовой ввод ----------
-          header('6.3 Голосовой ввод'),
-          flag('sttEnabled', 'Диктовка в текст', 'онлайн-распознавание (нужен интернет)'),
-          flag('recordEnabled', 'Запись голоса (аудиовложение)'),
-          flag('hybridEnabled', 'Гибридный режим (аудио + расшифровка)'),
-          flag('autoTranscribe', 'Автоматическая расшифровка аудио'),
-          flag('voiceCommandsEnabled', 'Голосовые команды'),
-          ListTile(
-            title: const Text('Язык распознавания'),
-            trailing: DropdownButton<String>(
-              value: s.sttLocale,
-              items: const [
-                DropdownMenuItem(value: 'ru-RU', child: Text('Русский')),
-                DropdownMenuItem(value: 'en-US', child: Text('English')),
-              ],
-              onChanged: (String? v) {
-                if (v != null) sc.setSttLocale(v);
-              },
-            ),
-          ),
-          // Диагностика распознавания: видно, какой движок доступен,
-          // скачана ли автономная модель и какая была последняя ошибка.
-          ListTile(
-            leading: const Icon(Icons.mic_external_on_outlined),
-            title: const Text('Проверка распознавания'),
-            subtitle: const Text('состояние движка, модели и последняя ошибка'),
-            trailing: TextButton(
-              child: const Text('Проверить'),
-              onPressed: () => _checkStt(context, app),
-            ),
-          ),
-
-          // ---------- 6.4 Аудио и хранение (хост) ----------
-          header('6.4 Аудио и хранение'),
-          if (Platform.isAndroid)
-            ListTile(
-              title: const Text('Усиление громкости голосовых'),
-              subtitle: Text(s.volumeBoostDb == 0
-                  ? 'выкл. — стандартная громкость'
-                  : '+${s.volumeBoostDb} дБ к стандартной громкости'),
-              trailing: SizedBox(
-                width: 170,
-                child: Slider(
-                  value: s.volumeBoostDb.toDouble(),
-                  min: 0,
-                  max: 10,
-                  divisions: 10,
-                  label: s.volumeBoostDb == 0 ? '0' : '+${s.volumeBoostDb} дБ',
-                  onChanged: (double v) => sc.setVolumeBoost(v.round()),
+          // ---------- Общие ----------
+          section(
+            icon: Icons.tune,
+            title: 'Общие',
+            children: [
+              SwitchListTile(
+                title: const Text('Тёмная тема'),
+                value: s.darkTheme,
+                onChanged: (bool v) => sc.setDarkTheme(v),
+              ),
+              flag('notifSound', 'Звук уведомлений'),
+              flag('vibration', 'Вибрация (Android)'),
+              flag('showDaySummary', 'Показывать сводку дня'),
+              ListTile(
+                title: const Text('Язык интерфейса'),
+                trailing: DropdownButton<String>(
+                  value: s.language,
+                  items: const [
+                    DropdownMenuItem(value: 'ru', child: Text('Русский')),
+                    DropdownMenuItem(value: 'en', child: Text('English')),
+                  ],
+                  onChanged: (String? v) {
+                    if (v != null) sc.setLanguage(v);
+                  },
                 ),
               ),
-            ),
-          hostFlag('Хранить аудиофайлы', hs.storeAudio, (bool v) => hs.storeAudio = v),
-          hostFlag('Автоочистка аудио при «Выполнена»', hs.cleanupOnDone,
-              (bool v) => hs.cleanupOnDone = v),
-          hostFlag('Автоочистка при «Отклонена/Отложена»', hs.cleanupOnRejected,
-              (bool v) => hs.cleanupOnRejected = v),
-          hostFlag('Хранить журнал аудита', hs.auditEnabled, (bool v) => hs.auditEnabled = v),
-          ListTile(
-            title: const Text('Срок хранения аудио, дней'),
-            subtitle: const Text('0 — не ограничен · управляется хостом'),
-            trailing: SizedBox(
-              width: 90,
-              child: TextFormField(
-                initialValue: '${hs.audioKeepDays}',
-                enabled: app.isHost,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                onFieldSubmitted: (String v) {
-                  hs.audioKeepDays = int.tryParse(v) ?? hs.audioKeepDays;
-                  app.saveHostSettings(hs);
-                },
-              ),
-            ),
-          ),
-          ListTile(
-            title: const Text('Срок хранения сообщений, дней'),
-            subtitle: const Text('0 — хранить всегда · управляется хостом'),
-            trailing: SizedBox(
-              width: 90,
-              child: TextFormField(
-                initialValue: '${hs.chatKeepDays}',
-                enabled: app.isHost,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                onFieldSubmitted: (String v) {
-                  hs.chatKeepDays = int.tryParse(v) ?? hs.chatKeepDays;
-                  app.saveHostSettings(hs);
-                },
-              ),
-            ),
+            ],
           ),
 
-          // ---------- 6.5 «Требует внимания» и напоминания (хост) ----------
-          header('6.5 «Требует внимания» и напоминания'),
-          hostFlag('Отмечать «Требует внимания»', hs.escalationEnabled,
-              (bool v) => hs.escalationEnabled = v),
-          ListTile(
-            title: const Text('Нет реакции, минут'),
-            subtitle: const Text('по умолчанию 30 · управляется хостом'),
-            trailing: SizedBox(
-              width: 90,
-              child: TextFormField(
-                initialValue: '${hs.escalationMinutes}',
-                enabled: app.isHost,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                onFieldSubmitted: (String v) {
-                  final int? n = int.tryParse(v);
-                  if (n != null && n > 0) {
-                    hs.escalationMinutes = n;
-                    app.saveHostSettings(hs);
-                  }
-                },
-              ),
-            ),
+          // ---------- Уведомления ----------
+          section(
+            icon: Icons.notifications_outlined,
+            title: 'Уведомления',
+            children: [
+              flag('notifNew', 'Новые заявки'),
+              flag('notifChanges', 'Изменения заявок (уведомлять о каждой правке)'),
+              flag('notifReminders', 'Напоминания'),
+              flag('notifEscalation', '«Требует внимания» (нет реакции на заявку)'),
+              flag('notifChat', 'Личные сообщения'),
+              flag('soundNew', 'Звук для новых заявок'),
+              flag('soundReminder', 'Звук для напоминаний и «Требует внимания»'),
+              flag('dnd', 'Не беспокоить'),
+              flag('workHoursEnabled', 'Рабочие часы для уведомлений'),
+              if (s.workHoursEnabled)
+                ListTile(
+                  title: const Text('Интервал рабочих часов'),
+                  trailing: Text('${s.workStart}:00–${s.workEnd}:00'),
+                  onTap: () async {
+                    final TimeOfDay? from = await showTimePicker(
+                        context: context, initialTime: TimeOfDay(hour: s.workStart, minute: 0));
+                    if (from == null || !context.mounted) return;
+                    final TimeOfDay? to = await showTimePicker(
+                        context: context, initialTime: TimeOfDay(hour: s.workEnd, minute: 0));
+                    if (to == null) return;
+                    sc.setWorkHours(from.hour, to.hour);
+                  },
+                ),
+              flag('quietHoursEnabled', 'Тихие часы',
+                  'в это время уведомления приходят без звука'),
+              if (s.quietHoursEnabled)
+                ListTile(
+                  title: const Text('Тихие часы'),
+                  trailing: Text('${s.quietStart}:00–${s.quietEnd}:00'),
+                  onTap: () async {
+                    final TimeOfDay? from = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(hour: s.quietStart, minute: 0));
+                    if (from == null || !context.mounted) return;
+                    final TimeOfDay? to = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay(hour: s.quietEnd, minute: 0));
+                    if (to == null) return;
+                    sc.setQuietHours(from.hour, to.hour);
+                  },
+                ),
+            ],
           ),
-          hostFlag('Отмечать заявку «Новая»', hs.escalateNew, (bool v) => hs.escalateNew = v),
-          hostFlag('Отмечать при просрочке «В работе»', hs.escalateInProgress,
-              (bool v) => hs.escalateInProgress = v),
-          hostFlag('Напоминания по времени', hs.remindersEnabled,
-              (bool v) => hs.remindersEnabled = v),
-          hostFlag('Повторяющиеся напоминания', hs.recurringRemindersEnabled,
-              (bool v) => hs.recurringRemindersEnabled = v, 'по умолчанию выключены'),
-          hostFlag('Только в рабочие часы', hs.escalationWorkHoursOnly,
-              (bool v) => hs.escalationWorkHoursOnly = v),
 
-          // ---------- 6.6 Заявки и отображение ----------
-          header('6.6 Заявки и отображение'),
-          flag('showPinnedTop', 'Закреплённые — вверху списка'),
-          flag('showColors', 'Цветовые метки'),
-          flag('showPriority', 'Приоритет'),
-          flag('showContactInList', 'Контакт в списке'),
-          flag('showPresence', 'Индикатор присутствия'),
-          flag('highlightOverdue', 'Подсветка просроченных'),
-          flag('myByDefault', '«Мои заявки» по умолчанию'),
-          flag('realtime', 'Автообновление списка в реальном времени'),
+          // ---------- Голосовой ввод ----------
+          section(
+            icon: Icons.mic_none,
+            title: 'Голосовой ввод',
+            children: [
+              flag('sttEnabled', 'Диктовка в текст', 'онлайн-распознавание (нужен интернет)'),
+              flag('recordEnabled', 'Запись голоса (аудиовложение)'),
+              flag('hybridEnabled', 'Гибридный режим (аудио + расшифровка)'),
+              flag('autoTranscribe', 'Автоматическая расшифровка аудио'),
+              flag('numbersToDigits', 'Числа цифрами',
+                  '«тридцать килограмм» → «30 килограмм», телефоны — слитно: 89001234567'),
+              flag('voiceCommandsEnabled', 'Голосовые команды'),
+              ListTile(
+                title: const Text('Язык распознавания'),
+                trailing: DropdownButton<String>(
+                  value: s.sttLocale,
+                  items: const [
+                    DropdownMenuItem(value: 'ru-RU', child: Text('Русский')),
+                    DropdownMenuItem(value: 'en-US', child: Text('English')),
+                  ],
+                  onChanged: (String? v) {
+                    if (v != null) sc.setSttLocale(v);
+                  },
+                ),
+              ),
+              // Диагностика распознавания: видно, какой движок доступен,
+              // скачана ли автономная модель и какая была последняя ошибка.
+              ListTile(
+                leading: const Icon(Icons.mic_external_on_outlined),
+                title: const Text('Проверка распознавания'),
+                subtitle: const Text('состояние движка, модели и последняя ошибка'),
+                trailing: TextButton(
+                  child: const Text('Проверить'),
+                  onPressed: () => _checkStt(context, app),
+                ),
+              ),
+            ],
+          ),
 
-          // ---------- 6.7 Контакты ----------
-          header('6.7 Контакты'),
-          flag('showContacts', 'Библиотека адресов'),
-          flag('callFromCard', 'Звонок из карточки заявки'),
-          flag('contactLinkEnabled', 'Связь контакта с заявкой'),
+          // ---------- Аудио и хранение ----------
+          section(
+            icon: Icons.library_music_outlined,
+            title: 'Аудио и хранение',
+            children: [
+              if (Platform.isAndroid)
+                ListTile(
+                  title: const Text('Усиление громкости голосовых'),
+                  subtitle: Text(s.volumeBoostDb == 0
+                      ? 'выкл. — стандартная громкость'
+                      : '+${s.volumeBoostDb} дБ к стандартной громкости'),
+                  trailing: SizedBox(
+                    width: 170,
+                    child: Slider(
+                      value: s.volumeBoostDb.toDouble(),
+                      min: 0,
+                      max: 10,
+                      divisions: 10,
+                      label: s.volumeBoostDb == 0 ? '0' : '+${s.volumeBoostDb} дБ',
+                      onChanged: (double v) => sc.setVolumeBoost(v.round()),
+                    ),
+                  ),
+                ),
+              hostFlag('Хранить аудиофайлы', hs.storeAudio, (bool v) => hs.storeAudio = v),
+              hostFlag('Автоочистка аудио при «Выполнена»', hs.cleanupOnDone,
+                  (bool v) => hs.cleanupOnDone = v),
+              hostFlag('Автоочистка при «Отклонена/Отложена»', hs.cleanupOnRejected,
+                  (bool v) => hs.cleanupOnRejected = v),
+              hostFlag('Хранить журнал аудита', hs.auditEnabled, (bool v) => hs.auditEnabled = v),
+              ListTile(
+                title: const Text('Срок хранения аудио, дней'),
+                subtitle: const Text('0 — не ограничен · управляется хостом'),
+                trailing: SizedBox(
+                  width: 90,
+                  child: TextFormField(
+                    initialValue: '${hs.audioKeepDays}',
+                    enabled: app.isHost,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onFieldSubmitted: (String v) {
+                      hs.audioKeepDays = int.tryParse(v) ?? hs.audioKeepDays;
+                      app.saveHostSettings(hs);
+                    },
+                  ),
+                ),
+              ),
+              ListTile(
+                title: const Text('Срок хранения сообщений, дней'),
+                subtitle: const Text('0 — хранить всегда · управляется хостом'),
+                trailing: SizedBox(
+                  width: 90,
+                  child: TextFormField(
+                    initialValue: '${hs.chatKeepDays}',
+                    enabled: app.isHost,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onFieldSubmitted: (String v) {
+                      hs.chatKeepDays = int.tryParse(v) ?? hs.chatKeepDays;
+                      app.saveHostSettings(hs);
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ),
 
-          // ---------- 6.8 Синхронизация и оффлайн ----------
-          header('6.8 Синхронизация и оффлайн'),
-          flag('offlineMode', 'Оффлайн-режим (локальный кэш)'),
-          flag('autoSync', 'Автосинхронизация при возврате сети'),
-          flag('showConnIndicator', 'Индикатор онлайн/оффлайн'),
-          flag('conflictNotify', 'Уведомление о конфликте синхронизации'),
+          // ---------- «Требует внимания» и напоминания (хост) ----------
+          section(
+            icon: Icons.alarm,
+            title: '«Требует внимания» и напоминания',
+            children: [
+              hostFlag('Отмечать «Требует внимания»', hs.escalationEnabled,
+                  (bool v) => hs.escalationEnabled = v),
+              ListTile(
+                title: const Text('Нет реакции, минут'),
+                subtitle: const Text('по умолчанию 30 · управляется хостом'),
+                trailing: SizedBox(
+                  width: 90,
+                  child: TextFormField(
+                    initialValue: '${hs.escalationMinutes}',
+                    enabled: app.isHost,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onFieldSubmitted: (String v) {
+                      final int? n = int.tryParse(v);
+                      if (n != null && n > 0) {
+                        hs.escalationMinutes = n;
+                        app.saveHostSettings(hs);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              hostFlag('Отмечать заявку «Новая»', hs.escalateNew, (bool v) => hs.escalateNew = v),
+              hostFlag('Отмечать при просрочке «В работе»', hs.escalateInProgress,
+                  (bool v) => hs.escalateInProgress = v),
+              hostFlag('Напоминания по времени', hs.remindersEnabled,
+                  (bool v) => hs.remindersEnabled = v),
+              hostFlag('Повторяющиеся напоминания', hs.recurringRemindersEnabled,
+                  (bool v) => hs.recurringRemindersEnabled = v, 'по умолчанию выключены'),
+              hostFlag('Только в рабочие часы', hs.escalationWorkHoursOnly,
+                  (bool v) => hs.escalationWorkHoursOnly = v),
+            ],
+          ),
+
+          // ---------- Заявки и отображение ----------
+          section(
+            icon: Icons.view_list_outlined,
+            title: 'Заявки и отображение',
+            children: [
+              flag('showPinnedTop', 'Закреплённые — вверху списка'),
+              flag('showColors', 'Цветовые метки'),
+              flag('showPriority', 'Приоритет'),
+              flag('showContactInList', 'Контакт в списке'),
+              flag('showPresence', 'Индикатор присутствия'),
+              flag('highlightOverdue', 'Подсветка просроченных'),
+              flag('myByDefault', '«Мои заявки» по умолчанию'),
+              flag('realtime', 'Автообновление списка в реальном времени'),
+            ],
+          ),
+
+          // ---------- Контакты ----------
+          section(
+            icon: Icons.contacts_outlined,
+            title: 'Контакты',
+            children: [
+              flag('showContacts', 'Библиотека адресов'),
+              flag('callFromCard', 'Звонок из карточки заявки'),
+              flag('contactLinkEnabled', 'Связь контакта с заявкой'),
+            ],
+          ),
+
+          // ---------- Синхронизация и оффлайн ----------
+          section(
+            icon: Icons.sync,
+            title: 'Синхронизация и оффлайн',
+            children: [
+              flag('offlineMode', 'Оффлайн-режим (локальный кэш)'),
+              flag('autoSync', 'Автосинхронизация при возврате сети'),
+              flag('showConnIndicator', 'Индикатор онлайн/оффлайн'),
+              flag('conflictNotify', 'Уведомление о конфликте синхронизации'),
+            ],
+          ),
 
           // ---------- Фон и уведомления (Android) ----------
-          header('Фон и уведомления (телефон)'),
-          SwitchListTile(
-            title: const Text('Держать связь в фоне'),
-            subtitle: const Text(
-                'Уведомления приходят, даже когда приложение закрыто. '
-                'В шторке будет тихое постоянное уведомление.'),
-            value: app.ls.bgKeepAlive,
-            onChanged: (bool v) {
-              unawaited(sc.setFlag('bgKeepAlive', v));
-              unawaited(app.background.setEnabled(v));
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.battery_saver),
-            title: const Text('Разрешить работу в фоне'),
-            subtitle: const Text(
-                'Открывает системную настройку: исключить приложение из '
-                'экономии заряда — иначе Android может рвать связь.'),
-            trailing: const Icon(Icons.open_in_new),
-            onTap: () async {
-              await app.background.requestIgnoreBatteryOptimizations();
-            },
+          section(
+            icon: Icons.battery_saver,
+            title: 'Фон и уведомления (телефон)',
+            children: [
+              SwitchListTile(
+                title: const Text('Держать связь в фоне'),
+                subtitle: const Text(
+                    'Уведомления приходят, даже когда приложение закрыто. '
+                    'В шторке будет тихое постоянное уведомление.'),
+                value: app.ls.bgKeepAlive,
+                onChanged: (bool v) {
+                  unawaited(sc.setFlag('bgKeepAlive', v));
+                  unawaited(app.background.setEnabled(v));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.battery_saver),
+                title: const Text('Разрешить работу в фоне'),
+                subtitle: const Text(
+                    'Открывает системную настройку: исключить приложение из '
+                    'экономии заряда — иначе Android может рвать связь.'),
+                trailing: const Icon(Icons.open_in_new),
+                onTap: () async {
+                  await app.background.requestIgnoreBatteryOptimizations();
+                },
+              ),
+            ],
           ),
 
           // ---------- Windows: трей и автозапуск (ПК-хост) ----------
-          if (!kIsWeb && Platform.isWindows) ...[
-            header('Компьютер (Windows)'),
-            flag('trayEnabled', 'Сворачивать в трей при закрытии',
-                'Крестик прячет окно — хост продолжает работать, телефоны '
-                'не теряют связь. Значок — рядом с часами.'),
-            SwitchListTile(
-              title: const Text('Запускать вместе с Windows'),
-              subtitle: const Text(
-                  'Приложение стартует само при включении компьютера '
-                  'и сразу сворачивается в трей.'),
-              value: app.ls.autoStartWindows,
-              onChanged: (bool v) {
-                unawaited(sc.setFlag('autoStartWindows', v));
-                unawaited(TrayService.instance.setAutoStart(v));
-              },
+          if (!kIsWeb && Platform.isWindows)
+            section(
+              icon: Icons.desktop_windows_outlined,
+              title: 'Компьютер (Windows)',
+              children: [
+                flag('trayEnabled', 'Сворачивать в трей при закрытии',
+                    'Крестик прячет окно — хост продолжает работать, телефоны '
+                    'не теряют связь. Значок — рядом с часами.'),
+                SwitchListTile(
+                  title: const Text('Запускать вместе с Windows'),
+                  subtitle: const Text(
+                      'Приложение стартует само при включении компьютера '
+                      'и сразу сворачивается в трей.'),
+                  value: app.ls.autoStartWindows,
+                  onChanged: (bool v) {
+                    unawaited(sc.setFlag('autoStartWindows', v));
+                    unawaited(TrayService.instance.setAutoStart(v));
+                  },
+                ),
+              ],
             ),
-          ],
 
-          // ---------- 6.9 Резервное копирование (хост) ----------
-          header('6.9 Резервное копирование'),
-          hostFlag('Автосохранение базы', hs.backupAuto, (bool v) => hs.backupAuto = v),
-          hostFlag('Резервная копия при изменениях', hs.backupOnChanges,
-              (bool v) => hs.backupOnChanges = v, 'иначе — раз в час'),
-          hostFlag('Ротация копий', hs.backupRotation, (bool v) => hs.backupRotation = v),
-          ListTile(
-            title: const Text('Хранить копий'),
-            subtitle: const Text('по умолчанию 5 · управляется хостом'),
-            trailing: SizedBox(
-              width: 90,
-              child: TextFormField(
-                initialValue: '${hs.backupKeep}',
-                enabled: app.isHost,
-                keyboardType: TextInputType.number,
-                textAlign: TextAlign.center,
-                onFieldSubmitted: (String v) {
-                  final int? n = int.tryParse(v);
-                  if (n != null && n > 0) {
-                    hs.backupKeep = n;
-                    app.saveHostSettings(hs);
-                  }
-                },
+          // ---------- Резервное копирование (хост) ----------
+          section(
+            icon: Icons.backup_outlined,
+            title: 'Резервное копирование',
+            children: [
+              hostFlag('Автосохранение базы', hs.backupAuto, (bool v) => hs.backupAuto = v),
+              hostFlag('Резервная копия при изменениях', hs.backupOnChanges,
+                  (bool v) => hs.backupOnChanges = v, 'иначе — раз в час'),
+              hostFlag('Ротация копий', hs.backupRotation, (bool v) => hs.backupRotation = v),
+              ListTile(
+                title: const Text('Хранить копий'),
+                subtitle: const Text('по умолчанию 5 · управляется хостом'),
+                trailing: SizedBox(
+                  width: 90,
+                  child: TextFormField(
+                    initialValue: '${hs.backupKeep}',
+                    enabled: app.isHost,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    onFieldSubmitted: (String v) {
+                      final int? n = int.tryParse(v);
+                      if (n != null && n > 0) {
+                        hs.backupKeep = n;
+                        app.saveHostSettings(hs);
+                      }
+                    },
+                  ),
+                ),
               ),
-            ),
+              hostFlag('Журнал в экспорт', hs.backupIncludeAudit,
+                  (bool v) => hs.backupIncludeAudit = v),
+              if (app.isHost) ...[
+                ListTile(
+                  leading: const Icon(Icons.save_outlined),
+                  title: const Text('Создать копию сейчас'),
+                  onTap: () async {
+                    final f = await app.backupNow();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(f != null ? 'Копия создана: ${f.path}' : 'Ошибка копии')));
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.upload_file),
+                  title: const Text('Экспорт в файл…'),
+                  onTap: () async {
+                    final String? path = await FilePicker.platform.saveFile(
+                      dialogTitle: 'Экспорт резервной копии',
+                      fileName: 'quickpad_backup.json',
+                    );
+                    if (path == null) return;
+                    final f = await app.exportBackup(path);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(f != null ? 'Экспортировано: $path' : 'Ошибка экспорта')));
+                    }
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.restore),
+                  title: const Text('Восстановить из файла…'),
+                  onTap: () async {
+                    final FilePickerResult? r =
+                        await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
+                    final String? path = r?.files.single.path;
+                    if (path == null) return;
+                    final String? err = await app.importBackup(path);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          content: Text(err ?? 'Восстановлено. Клиенты получат данные при синхронизации.')));
+                    }
+                  },
+                ),
+              ] else
+                const ListTile(
+                  leading: Icon(Icons.info_outline),
+                  title: Text('Резервное копирование выполняется на хосте'),
+                ),
+            ],
           ),
-          hostFlag('Журнал в экспорт', hs.backupIncludeAudit,
-              (bool v) => hs.backupIncludeAudit = v),
-          if (app.isHost) ...[
-            ListTile(
-              leading: const Icon(Icons.save_outlined),
-              title: const Text('Создать копию сейчас'),
-              onTap: () async {
-                final f = await app.backupNow();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(f != null ? 'Копия создана: ${f.path}' : 'Ошибка копии')));
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.upload_file),
-              title: const Text('Экспорт в файл…'),
-              onTap: () async {
-                final String? path = await FilePicker.platform.saveFile(
-                  dialogTitle: 'Экспорт резервной копии',
-                  fileName: 'quickpad_backup.json',
-                );
-                if (path == null) return;
-                final f = await app.exportBackup(path);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(f != null ? 'Экспортировано: $path' : 'Ошибка экспорта')));
-                }
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.restore),
-              title: const Text('Восстановить из файла…'),
-              onTap: () async {
-                final FilePickerResult? r =
-                    await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
-                final String? path = r?.files.single.path;
-                if (path == null) return;
-                final String? err = await app.importBackup(path);
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(err ?? 'Восстановлено. Клиенты получат данные при синхронизации.')));
-                }
-              },
-            ),
-          ] else
-            const ListTile(
-              leading: Icon(Icons.info_outline),
-              title: Text('Резервное копирование выполняется на хосте'),
-            ),
 
-          // ---------- 6.10 Пользователи и устройство ----------
-          header('6.10 Пользователи и устройство'),
-          flag('userBinding', 'Привязка пользователя к устройству'),
-          flag('showOnlineUsers', 'Показывать список онлайн-пользователей'),
-          flag('allowUserSwitch', 'Разрешить смену пользователя на устройстве'),
-          if (app.isHost) ...[
-            ListTile(
-              title: const Text('Роли пользователей'),
-              subtitle: const Text(
-                  'руководитель видит все заявки и статистику, работник — свои'),
-            ),
-            for (final u in app.users)
-              SwitchListTile(
-                title: Text(u.name),
-                subtitle: Text(u.isManager ? 'Руководитель' : 'Работник'),
-                value: u.isManager,
-                onChanged: (bool v) =>
-                    app.setUserRole(u, v ? 'manager' : 'worker'),
-              ),
-          ],
+          // ---------- Пользователи и устройство ----------
+          section(
+            icon: Icons.people_outline,
+            title: 'Пользователи и устройство',
+            children: [
+              flag('userBinding', 'Привязка пользователя к устройству'),
+              flag('showOnlineUsers', 'Показывать список онлайн-пользователей'),
+              flag('allowUserSwitch', 'Разрешить смену пользователя на устройстве'),
+              if (app.isHost) ...[
+                const ListTile(
+                  title: Text('Роли пользователей'),
+                  subtitle: Text(
+                      'руководитель видит все заявки и статистику, работник — свои'),
+                ),
+                for (final u in app.users)
+                  SwitchListTile(
+                    title: Text(u.name),
+                    subtitle: Text(u.isManager ? 'Руководитель' : 'Работник'),
+                    value: u.isManager,
+                    onChanged: (bool v) =>
+                        app.setUserRole(u, v ? 'manager' : 'worker'),
+                  ),
+              ],
+            ],
+          ),
 
-          // ---------- 6.11 Виджет и быстрые действия ----------
-          header('6.11 Виджет и быстрые действия (Android)'),
-          flag('widgetEnabled', 'Виджет «Быстрая заметка»'),
-          flag('quickLine', 'Быстрое создание в одну строку'),
-          flag('voiceButton', 'Голосовая кнопка на главном экране'),
+          // ---------- Виджет и быстрые действия ----------
+          section(
+            icon: Icons.widgets_outlined,
+            title: 'Виджет и быстрые действия (Android)',
+            children: [
+              flag('widgetEnabled', 'Виджет «Быстрая заметка»'),
+              flag('quickLine', 'Быстрое создание в одну строку'),
+              flag('voiceButton', 'Голосовая кнопка на главном экране'),
+            ],
+          ),
 
           // ---------- Отчёты ----------
-          header('Отчёты и статистика'),
-          flag('statsEnabled', 'Экран статистики',
-              'сводка за день/неделю/месяц — кнопка в меню списка заявок'),
+          section(
+            icon: Icons.bar_chart,
+            title: 'Отчёты и статистика',
+            children: [
+              flag('statsEnabled', 'Экран статистики',
+                  'сводка за день/неделю/месяц — кнопка в меню списка заявок'),
+            ],
+          ),
 
           // ---------- Шаблоны заявок ----------
-          header('Шаблоны заявок'),
-          ListTile(
-            leading: const Icon(Icons.notes),
-            title: const Text('Заготовки текста заявки'),
-            subtitle: Text(sc.templates.isEmpty
-                ? 'например: «Закупить материалы для…» — вставляются '
-                    'одним нажатием в редакторе заявки'
-                : 'шаблонов: ${sc.templates.length}'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _editTemplates(context, sc),
+          section(
+            icon: Icons.notes,
+            title: 'Шаблоны заявок',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.notes),
+                title: const Text('Заготовки текста заявки'),
+                subtitle: Text(sc.templates.isEmpty
+                    ? 'например: «Закупить материалы для…» — вставляются '
+                        'одним нажатием в редакторе заявки'
+                    : 'шаблонов: ${sc.templates.length}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _editTemplates(context, sc),
+              ),
+            ],
           ),
 
           // ---------- Хранилище: очистка кэша и журнала ----------
-          header('Хранилище'),
-          ListTile(
-            leading: const Icon(Icons.cleaning_services_outlined),
-            title: const Text('Очистка кэша'),
-            subtitle: Text(app.isHost
-                ? 'временные файлы, кэш фото и файлы без заявок на хосте'
-                : 'временные файлы и кэш фото на устройстве'),
-            onTap: () => _cacheCleanup(context, app),
+          section(
+            icon: Icons.cleaning_services_outlined,
+            title: 'Хранилище',
+            children: [
+              ListTile(
+                leading: const Icon(Icons.cleaning_services_outlined),
+                title: const Text('Очистка кэша'),
+                subtitle: Text(app.isHost
+                    ? 'временные файлы, кэш фото и файлы без заявок на хосте'
+                    : 'временные файлы и кэш фото на устройстве'),
+                onTap: () => _cacheCleanup(context, app),
+              ),
+              if (app.isHost)
+                ListTile(
+                  leading: const Icon(Icons.history_toggle_off),
+                  title: const Text('Очистить журнал'),
+                  subtitle: const Text(
+                      'история изменений удалится на хосте и на всех устройствах'),
+                  onTap: () => _confirmClearAudit(context, app),
+                ),
+            ],
           ),
-          if (app.isHost)
-            ListTile(
-              leading: const Icon(Icons.history_toggle_off),
-              title: const Text('Очистить журнал'),
-              subtitle: const Text(
-                  'история изменений удалится на хосте и на всех устройствах'),
-              onTap: () => _confirmClearAudit(context, app),
-            ),
 
-          const SizedBox(height: 24),
-          ListTile(
-            leading: const Icon(Icons.replay_circle_filled_outlined),
-            title: const Text('Изменить роль устройства / хост'),
-            subtitle: const Text('повторить первоначальную настройку'),
-            onTap: () async {
-              await app.resetConfiguration();
-              if (context.mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
-              }
-            },
+          const SizedBox(height: 12),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            elevation: 0.5,
+            child: ListTile(
+              leading: const Icon(Icons.replay_circle_filled_outlined),
+              title: const Text('Изменить роль устройства / хост'),
+              subtitle: const Text('повторить первоначальную настройку'),
+              onTap: () async {
+                await app.resetConfiguration();
+                if (context.mounted) {
+                  Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
+                }
+              },
+            ),
           ),
           const SizedBox(height: 24),
         ],

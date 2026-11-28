@@ -16,6 +16,7 @@ import '../models/enums.dart';
 import '../models/note.dart';
 import '../models/user.dart';
 import '../services/audio_service.dart';
+import '../services/number_words.dart';
 import '../services/photo_service.dart';
 import '../state/app_state.dart';
 import '../state/settings_controller.dart';
@@ -174,8 +175,12 @@ class _NoteEditScreenState extends State<NoteEditScreen>
       localeId: app.ls.sttLocale,
       continuous: true, // не отключается на паузах: перезапускается само
       onResult: (String text, bool isFinal) {
-        _textCtl.text = text;
-        _textCtl.selection = TextSelection.collapsed(offset: text.length);
+        // Настройка «Числа цифрами»: «тридцать килограмм» → «30 килограмм»,
+        // телефоны — слитно. Голосовые команды конвертер не затрагивает.
+        final String t =
+            app.ls.numbersToDigits ? numberWordsToDigits(text) : text;
+        _textCtl.text = t;
+        _textCtl.selection = TextSelection.collapsed(offset: t.length);
       },
       onStatus: (String status) {
         if (!mounted) return;
@@ -225,7 +230,10 @@ class _NoteEditScreenState extends State<NoteEditScreen>
     }
     _toast('Расшифровываю запись…');
     final String? text = await app.stt.offline.transcribeWav(wavPath);
-    final String t = (text ?? '').trim();
+    String t = (text ?? '').trim();
+    if (t.isNotEmpty && app.ls.numbersToDigits) {
+      t = numberWordsToDigits(t);
+    }
     if (t.isEmpty) {
       _toast('Речь не распознана (тишина или неразборчиво)');
       return;
@@ -329,10 +337,13 @@ class _NoteEditScreenState extends State<NoteEditScreen>
       // Гибридный режим (ТЗ 4.1): аудио + автоматическая расшифровка в текст.
       // Аудио хранится рядом с заявкой, текст остаётся редактируемым.
       final String transcript = _recTranscript.trim();
-      if (transcript.isNotEmpty) {
-        att.transcript = transcript;
+      final String prepared = transcript.isNotEmpty && app.ls.numbersToDigits
+          ? numberWordsToDigits(transcript)
+          : transcript;
+      if (prepared.isNotEmpty) {
+        att.transcript = prepared;
         if (_textCtl.text.trim().isEmpty) {
-          _textCtl.text = transcript; // текст можно править
+          _textCtl.text = prepared; // текст можно править
           _textCtl.selection =
               TextSelection.collapsed(offset: _textCtl.text.length);
         }
@@ -435,11 +446,14 @@ class _NoteEditScreenState extends State<NoteEditScreen>
     }
     final String transcript =
         res.text.trim().isNotEmpty ? res.text.trim() : _recTranscript.trim();
-    if (transcript.isNotEmpty) {
-      att.transcript = transcript;
+    final String prepared = transcript.isNotEmpty && app.ls.numbersToDigits
+        ? numberWordsToDigits(transcript)
+        : transcript;
+    if (prepared.isNotEmpty) {
+      att.transcript = prepared;
       if (_textCtl.text.trim().isEmpty) {
-        _textCtl.text = transcript; // текст можно править
-        _textCtl.selection = TextSelection.collapsed(offset: transcript.length);
+        _textCtl.text = prepared; // текст можно править
+        _textCtl.selection = TextSelection.collapsed(offset: prepared.length);
       }
     }
     setState(() => _audio = att);

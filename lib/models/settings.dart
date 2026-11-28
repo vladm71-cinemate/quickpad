@@ -117,6 +117,7 @@ class LocalSettings {
   bool hybridEnabled = true; // Гибридный режим
   bool autoTranscribe = true; // Автоматическая расшифровка аудио
   bool voiceCommandsEnabled = true; // Голосовые команды
+  bool numbersToDigits = true; // Числа цифрами при диктовке и расшифровке
   String sttLocale = 'ru-RU'; // Язык распознавания
 
   // 6.6 Заявки и отображение
@@ -209,6 +210,7 @@ class LocalSettings {
         'hybridEnabled': (s) => s.hybridEnabled,
         'autoTranscribe': (s) => s.autoTranscribe,
         'voiceCommandsEnabled': (s) => s.voiceCommandsEnabled,
+        'numbersToDigits': (s) => s.numbersToDigits,
         'showPinnedTop': (s) => s.showPinnedTop,
         'showColors': (s) => s.showColors,
         'showPriority': (s) => s.showPriority,
@@ -255,6 +257,7 @@ class LocalSettings {
         'hybridEnabled': (s, v) => s.hybridEnabled = v,
         'autoTranscribe': (s, v) => s.autoTranscribe = v,
         'voiceCommandsEnabled': (s, v) => s.voiceCommandsEnabled = v,
+        'numbersToDigits': (s, v) => s.numbersToDigits = v,
         'showPinnedTop': (s, v) => s.showPinnedTop = v,
         'showColors': (s, v) => s.showColors = v,
         'showPriority': (s, v) => s.showPriority = v,
