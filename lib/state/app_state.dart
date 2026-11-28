@@ -325,6 +325,12 @@ class AppState extends ChangeNotifier {
     // STT инициализируется лениво при первом нажатии кнопки диктовки —
     // разрешение микрофона не запрашиваем при старте приложения.
     unawaited(audio.cleanupTemp());
+    // Усиление громкости (Android) и обновление настроек на лету.
+    audio.initBoost();
+    audio.boostDb = ls.volumeBoostDb;
+    settingsCtl.addListener(() {
+      audio.boostDb = settingsCtl.settings.volumeBoostDb;
+    });
 
     if (isHost) {
       await _startHostStack();

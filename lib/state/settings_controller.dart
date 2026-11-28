@@ -77,6 +77,12 @@ class SettingsController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setVolumeBoost(int db) async {
+    settings.volumeBoostDb = db.clamp(0, 10);
+    await _save();
+    notifyListeners();
+  }
+
   // ---------- Шаблоны заявок ----------
 
   static const String _kTemplates = 'templates';

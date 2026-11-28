@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -26,7 +28,30 @@ class AudioService {
   DateTime? _startedAt;
   String? _currentPath;
 
-  bool get isPlaying => _player.state == PlayerState.playing;
+  /// Усиление громкости воспроизведения в дБ (0 = без усиления).
+  /// Задаётся из настроек приложения.
+  int boostDb = 0;
+
+  static const MethodChannel _boostChannel = MethodChannel('quickpad/player');
+  bool _boosting = false;
+
+  bool get isPlaying => _boosting || _player.state == PlayerState.playing;
+
+  /// Подписка на «конец воспроизведения» нативного усиленного плеера.
+  /// Вызывать один раз при инициализации.
+  void initBoost() {
+    if (kIsWeb || !Platform.isAndroid) return;
+    _boostChannel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'completed') {
+        _boosting = false;
+        for (final void Function() cb in _completeCbs) {
+          cb();
+        }
+      }
+    });
+  }
+
+  final List<void Function()> _completeCbs = <void Function()>[];
 
   Future<bool> ensureMicPermission() async {
     // На десктопе (Windows/Linux) рантайм-разрешения микрофона нет.
@@ -115,16 +140,45 @@ class AudioService {
   String audioUrl(String host, int port, String fileName) => 'http://$host:$port/audio/$fileName';
 
   Future<void> play(String url) async {
+    if (boostDb > 0 && !kIsWeb && Platform.isAndroid) {
+      // Усиленное воспроизведение выше стандартной громкости (Android).
+      await stopPlay();
+      _boosting = true;
+      try {
+        await _boostChannel.invokeMethod<bool>(
+            'play', <String, Object?>{'source': url, 'boostDb': boostDb});
+      } catch (_) {
+        _boosting = false;
+      }
+      return;
+    }
     await _player.stop();
     await _player.play(UrlSource(url));
   }
 
   Future<void> playLocal(String path) async {
+    if (boostDb > 0 && !kIsWeb && Platform.isAndroid) {
+      await stopPlay();
+      _boosting = true;
+      try {
+        await _boostChannel.invokeMethod<bool>(
+            'play', <String, Object?>{'source': path, 'boostDb': boostDb});
+      } catch (_) {
+        _boosting = false;
+      }
+      return;
+    }
     await _player.stop();
     await _player.play(DeviceFileSource(path));
   }
 
   Future<void> stopPlay() async {
+    if (_boosting) {
+      _boosting = false;
+      try {
+        await _boostChannel.invokeMethod<void>('stop');
+      } catch (_) {}
+    }
     try {
       await _player.stop();
     } catch (_) {}
@@ -132,6 +186,7 @@ class AudioService {
 
   /// Колбэк окончания воспроизведения.
   void onComplete(void Function() cb) {
+    _completeCbs.add(cb);
     _player.onPlayerComplete.listen((_) => cb());
   }
 

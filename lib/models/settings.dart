@@ -108,6 +108,8 @@ class LocalSettings {
   bool workHoursEnabled = false; // Рабочие часы для уведомлений
   int workStart = 9;
   int workEnd = 19;
+  /// Усиление громкости голосовых сообщений в дБ (0 = выкл., макс. 10).
+  int volumeBoostDb = 0;
 
   // 6.3 Голосовой ввод
   bool sttEnabled = true; // Диктовка в текст
@@ -180,6 +182,7 @@ class LocalSettings {
     sttLocale = j['sttLocale'] as String? ?? sttLocale;
     workStart = (j['workStart'] as num?)?.toInt() ?? workStart;
     workEnd = (j['workEnd'] as num?)?.toInt() ?? workEnd;
+    volumeBoostDb = (j['volumeBoostDb'] as num?)?.toInt() ?? volumeBoostDb;
     quietStart = (j['quietStart'] as num?)?.toInt() ?? quietStart;
     quietEnd = (j['quietEnd'] as num?)?.toInt() ?? quietEnd;
     for (final e in _boolSetters().entries) {
@@ -287,6 +290,7 @@ class LocalSettings {
         'sttLocale': sttLocale,
         'workStart': workStart,
         'workEnd': workEnd,
+        'volumeBoostDb': volumeBoostDb,
         'quietStart': quietStart,
         'quietEnd': quietEnd,
       };

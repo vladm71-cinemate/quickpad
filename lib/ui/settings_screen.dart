@@ -330,6 +330,24 @@ class SettingsScreen extends StatelessWidget {
 
           // ---------- 6.4 Аудио и хранение (хост) ----------
           header('6.4 Аудио и хранение'),
+          if (Platform.isAndroid)
+            ListTile(
+              title: const Text('Усиление громкости голосовых'),
+              subtitle: Text(s.volumeBoostDb == 0
+                  ? 'выкл. — стандартная громкость'
+                  : '+${s.volumeBoostDb} дБ к стандартной громкости'),
+              trailing: SizedBox(
+                width: 170,
+                child: Slider(
+                  value: s.volumeBoostDb.toDouble(),
+                  min: 0,
+                  max: 10,
+                  divisions: 10,
+                  label: s.volumeBoostDb == 0 ? '0' : '+${s.volumeBoostDb} дБ',
+                  onChanged: (double v) => sc.setVolumeBoost(v.round()),
+                ),
+              ),
+            ),
           hostFlag('Хранить аудиофайлы', hs.storeAudio, (bool v) => hs.storeAudio = v),
           hostFlag('Автоочистка аудио при «Выполнена»', hs.cleanupOnDone,
               (bool v) => hs.cleanupOnDone = v),

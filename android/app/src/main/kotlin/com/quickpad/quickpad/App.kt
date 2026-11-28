@@ -2,6 +2,8 @@ package com.quickpad.quickpad
 
 import android.app.Application
 import android.content.Intent
+import android.media.MediaPlayer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
@@ -88,5 +90,64 @@ class App : Application() {
 
         // Запустить фоновую связь, если не выключена в настройках.
         SyncService.startIfEnabled(this)
+
+        // Усиленное воспроизведение: громкость выше стандартных 100%
+        // (LoudnessEnhancer, усиление в дБ из настроек приложения).
+        MethodChannel(messenger, "quickpad/player").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "play" -> {
+                    try {
+                        val source = call.argument<String>("source") ?: ""
+                        val boostDb = call.argument<Int>("boostDb") ?: 0
+                        boostPlayer?.let {
+                            try { it.stop() } catch (_: Exception) {}
+                            it.release()
+                        }
+                        boostEnhancer?.release()
+                        boostEnhancer = null
+                        val mp = MediaPlayer()
+                        mp.setDataSource(source) // путь к файлу или http-URL
+                        mp.setOnPreparedListener { player ->
+                            if (boostDb > 0) {
+                                try {
+                                    boostEnhancer = LoudnessEnhancer(player.audioSessionId).apply {
+                                        setTargetGain(boostDb * 100) // дБ → миллибелы
+                                        enabled = true
+                                    }
+                                } catch (_: Exception) {}
+                            }
+                            player.start()
+                        }
+                        mp.setOnCompletionListener {
+                            try {
+                                MethodChannel(messenger, "quickpad/player")
+                                    .invokeMethod("completed", null)
+                            } catch (_: Exception) {}
+                        }
+                        mp.prepareAsync()
+                        boostPlayer = mp
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "stop" -> {
+                    try {
+                        boostPlayer?.stop()
+                        boostPlayer?.release()
+                    } catch (_: Exception) {}
+                    boostPlayer = null
+                    boostEnhancer?.release()
+                    boostEnhancer = null
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    companion object {
+        var boostPlayer: MediaPlayer? = null
+        var boostEnhancer: LoudnessEnhancer? = null
     }
 }
