@@ -25,6 +25,8 @@ class App : Application() {
 
     companion object {
         const val engineId = "quickpad_engine"
+        var boostPlayer: MediaPlayer? = null
+        var boostEnhancer: LoudnessEnhancer? = null
     }
 
     override fun onCreate() {
@@ -144,10 +146,5 @@ class App : Application() {
                 else -> result.notImplemented()
             }
         }
-    }
-
-    companion object {
-        var boostPlayer: MediaPlayer? = null
-        var boostEnhancer: LoudnessEnhancer? = null
     }
 }
