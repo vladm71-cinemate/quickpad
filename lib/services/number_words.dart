@@ -103,26 +103,38 @@ bool _isNumWord(String w) =>
 
 /// Парсер непрерывной цепочки числительных с позиции [i] → значение.
 /// Возвращает (значение, индекс после цепочки) или null.
+///
+/// Цепочка «ступенчатая»: порядок ступеней внутри числа строго нисходящий
+/// (сотни → десятки → единицы); слово той же или более высокой ступени
+/// обрывает цепочку — это уже НОВОЕ число («пять восемь» — «5 8», а не
+/// «13»). Иначе жадная цепочка проглатывала телефонный триггер
+/// «восемь/семь», и номер в середине текста не распознавался.
 ({int value, int next})? _parseNumber(List<String> w, int i) {
   int total = 0;
   int cur = 0;
   int j = i;
   bool any = false;
+  int lastRank = 99;
   while (j < w.length) {
     final String t = w[j];
     final int? u = _units[t] ?? _teens[t] ?? _tens[t] ?? _hundreds[t];
     if (u != null) {
+      final int r = _rank(t);
+      if (any && r >= lastRank) break; // новая ступень → число закончилось
       cur += u;
+      lastRank = r;
       any = true;
       j++;
     } else if (_thousand.contains(t)) {
       total += (cur == 0 ? 1 : cur) * 1000;
       cur = 0;
+      lastRank = 99;
       any = true;
       j++;
     } else if (_million.contains(t)) {
       total += (cur == 0 ? 1 : cur) * 1000000;
       cur = 0;
+      lastRank = 99;
       any = true;
       j++;
     } else {

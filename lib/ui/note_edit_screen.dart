@@ -67,6 +67,7 @@ class _NoteEditScreenState extends State<NoteEditScreen>
   bool _playingAudio = false;
   DateTime? _recStarted;
   String _recTranscript = ''; // буфер расшифровки гибридного режима
+  String _dictationPrefix = ''; // текст, который был в поле до диктовки
   bool _hybridWav = false; // идёт запись через автономный движок (мик+WAV)
   String? _hybridWavPath;
   bool _saving = false;
@@ -174,6 +175,11 @@ class _NoteEditScreenState extends State<NoteEditScreen>
       }
     }
     setState(() => _dictating = true);
+    // Диктовка ДОПИСЫВАЕТ к уже существующему тексту, а не заменяет его:
+    // запоминаем префикс и подставляем перед каждым результатом. Раньше
+    // поле затиралось при каждом новом старте диктовки.
+    final String existing = _textCtl.text.trimRight();
+    _dictationPrefix = existing.isEmpty ? '' : '$existing ';
     final bool ok = await app.stt.start(
       localeId: app.ls.sttLocale,
       continuous: true, // не отключается на паузах: перезапускается само
@@ -183,8 +189,9 @@ class _NoteEditScreenState extends State<NoteEditScreen>
         // Пауза посреди номера телефона фиксирует фрагмент, и преждевременная
         // конвертация («восемь девятьсот двенадцать» → «8 912») навсегда
         // ломала склейку остатка номера — получалась каша из цифр и слов.
-        _textCtl.text = text;
-        _textCtl.selection = TextSelection.collapsed(offset: text.length);
+        final String full = _dictationPrefix + text;
+        _textCtl.text = full;
+        _textCtl.selection = TextSelection.collapsed(offset: full.length);
       },
       onStatus: (String status) {
         if (!mounted) return;

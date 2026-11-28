@@ -556,7 +556,10 @@ class _ChatScreenState extends State<ChatScreen> {
             bottomRight: Radius.circular(mine ? 4 : 14),
           ),
         ),
-        child: Column(
+        child: SelectionContainer.disabled(
+          // В пузыре выделение отключено: долгое нажатие на сообщение
+          // открывает меню (ответить / скопировать / удалить).
+          child: Column(
           crossAxisAlignment:
               mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
@@ -587,6 +590,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ?.copyWith(color: cs.onSurfaceVariant),
             ),
           ],
+          ),
         ),
         ),
       ),

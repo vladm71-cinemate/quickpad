@@ -77,6 +77,13 @@ class _QuickPadAppState extends State<QuickPadApp> with WidgetsBindingObserver {
       themeMode: settings.settings.darkTheme ? ThemeMode.dark : ThemeMode.light,
       locale: Locale(settings.settings.language),
       supportedLocales: const [Locale('ru'), Locale('en')],
+      // Глобальное выделение: любой текст (заявки, журнал, контакты,
+      // настройки) выделяется мышью на ПК и долгим нажатием на телефоне —
+      // с кнопкой «Копировать». Пузыри чата исключены
+      // (SelectionContainer.disabled): там долгое нажатие открывает меню
+      // сообщения (ответить / скопировать / удалить).
+      builder: (BuildContext context, Widget? child) =>
+          SelectionArea(child: child ?? const SizedBox.shrink()),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
